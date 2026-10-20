@@ -221,7 +221,7 @@ impl Setup {
 type SessionIo = (Session, Box<dyn Write + Send>, Box<dyn Read + Send>);
 
 pub struct Session {
-    pub master: Arc<parking_lot::Mutex<Box<dyn MasterPty + Send>>>,
+    pub master: Arc<parking_lot::Mutex<Option<Box<dyn MasterPty + Send>>>>,
     killer: Box<dyn ChildKiller + Send + Sync>,
     pub exit: Arc<parking_lot::Mutex<Option<u32>>>,
     #[cfg(windows)]
@@ -257,16 +257,20 @@ impl Session {
         let killer = child.clone_killer();
         let exit = Arc::new(parking_lot::Mutex::new(None));
         let status = exit.clone();
-        std::thread::spawn(move || {
-            let result = child.wait();
-            *status.lock() = Some(result.map(|s| s.exit_code()).unwrap_or(1));
-        });
         let writer = pair.master.take_writer()?;
         let reader = pair.master.try_clone_reader()?;
         drop(pair.slave);
+        let master = Arc::new(parking_lot::Mutex::new(Some(pair.master)));
+        let close_master = master.clone();
+        std::thread::spawn(move || {
+            let result = child.wait();
+            *status.lock() = Some(result.map(|s| s.exit_code()).unwrap_or(1));
+            // Close ConPTY off the UI thread so its reader can drain and receive EOF.
+            drop(close_master.lock().take());
+        });
         Ok((
             Self {
-                master: Arc::new(parking_lot::Mutex::new(pair.master)),
+                master,
                 killer,
                 exit,
                 #[cfg(windows)]
@@ -358,6 +362,8 @@ mod tests {
         session
             .master
             .lock()
+            .as_ref()
+            .unwrap()
             .resize(PtySize {
                 rows: 42,
                 cols: 132,

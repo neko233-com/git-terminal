@@ -121,12 +121,14 @@ impl Desktop {
         let terminal = cx.new(|cx| {
             TerminalView::new(writer, reader, config, cx)
                 .with_resize_callback(move |cols, rows| {
-                    let _ = master.lock().resize(portable_pty::PtySize {
-                        cols: cols.min(1000) as u16,
-                        rows: rows.min(1000) as u16,
-                        pixel_width: 0,
-                        pixel_height: 0,
-                    });
+                    if let Some(master) = master.lock().as_ref() {
+                        let _ = master.resize(portable_pty::PtySize {
+                            cols: cols.min(1000) as u16,
+                            rows: rows.min(1000) as u16,
+                            pixel_width: 0,
+                            pixel_height: 0,
+                        });
+                    }
                 })
                 .with_title_callback(move |window, cx, title| {
                     let title: String =
