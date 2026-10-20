@@ -224,7 +224,8 @@ impl Desktop {
     }
     fn shell(&mut self, profile: &str, window: &mut Window, cx: &mut Context<Self>) {
         match Setup::discover(&self.setup.cwd, profile, self.setup.git.as_deref()) {
-            Ok(setup) => {
+            Ok(mut setup) => {
+                setup.no_profile = self.setup.no_profile;
                 self.setup = setup;
                 self.add_tab(None, window, cx);
             }

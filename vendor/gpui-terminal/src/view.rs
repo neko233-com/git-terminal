@@ -1294,6 +1294,8 @@ impl EntityInputHandler for TerminalView {
         cx: &mut Context<Self>,
     ) {
         self.preedit = text.to_owned();
+        self.state
+            .with_term_mut(|term| term.scroll_display(alacritty_terminal::grid::Scroll::Bottom));
         window.notify_text_input_changed(&self.focus_handle);
         cx.notify();
     }
