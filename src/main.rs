@@ -10,6 +10,10 @@ use gpui_terminal::{ColorPalette, TerminalConfig, TerminalView};
 use session::{Session, Setup};
 use settings::Settings;
 use std::path::PathBuf;
+use std::sync::{
+    Arc,
+    atomic::{AtomicU32, Ordering},
+};
 
 #[derive(Parser, Clone)]
 #[command(
@@ -68,6 +72,7 @@ struct Desktop {
     setup: Setup,
     settings: Settings,
     error: Option<String>,
+    command_exit: Arc<AtomicU32>,
 }
 
 impl Desktop {
@@ -75,6 +80,7 @@ impl Desktop {
         setup: Setup,
         settings: Settings,
         command: Option<String>,
+        command_exit: Arc<AtomicU32>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -85,6 +91,7 @@ impl Desktop {
             setup,
             settings,
             error: None,
+            command_exit,
         };
         desktop.add_tab(command, window, cx);
         desktop
@@ -94,6 +101,9 @@ impl Desktop {
         let (session, writer, reader) = match result {
             Ok(v) => v,
             Err(e) => {
+                if command.is_some() {
+                    self.command_exit.store(1, Ordering::Release);
+                }
                 self.error = Some(e.to_string());
                 cx.notify();
                 return;
@@ -102,6 +112,8 @@ impl Desktop {
         let id = self.next_id;
         self.next_id += 1;
         let master = session.master.clone();
+        let shell_exit = session.exit.clone();
+        let command_exit = command.as_ref().map(|_| self.command_exit.clone());
         let parent = cx.weak_entity();
         let title_parent = parent.clone();
         let config = TerminalConfig {
@@ -135,13 +147,18 @@ impl Desktop {
                         title.chars().filter(|c| !c.is_control()).take(80).collect();
                     let _ = title_parent.update(cx, |app, cx| {
                         if let Some(tab) = app.tabs.iter_mut().find(|t| t.id == id) {
-                            tab.label = title;
+                            if !title.is_empty() {
+                                tab.label = title;
+                            }
                         }
                         window.set_window_title("Git-Terminal");
                         cx.notify();
                     });
                 })
                 .with_exit_callback(move |window, cx| {
+                    if let Some(result) = &command_exit {
+                        result.store(shell_exit.lock().unwrap_or(1), Ordering::Release);
+                    }
                     let parent = parent.clone();
                     let handle = window.window_handle();
                     cx.spawn(async move |_, cx| {
@@ -390,7 +407,7 @@ impl Render for Desktop {
     }
 }
 
-fn run() -> Result<()> {
+fn run() -> Result<u32> {
     let options = Options::parse();
     let mut settings = Settings::load();
     if let Some(Action::Language { action }) = &options.action {
@@ -402,7 +419,7 @@ fn run() -> Result<()> {
             "{}",
             serde_json::json!({"product":"git-terminal","configured":settings.language,"language":if settings.chinese(){"chinese"}else{"english"}})
         );
-        return Ok(());
+        return Ok(0);
     }
     let cwd = if options.cd_to_home {
         PathBuf::from(
@@ -422,8 +439,11 @@ fn run() -> Result<()> {
     setup.no_profile = options.no_profile;
     if options.print_setup {
         println!("{}", serde_json::to_string_pretty(&setup)?);
-        return Ok(());
+        return Ok(0);
     }
+    let command_exit = Arc::new(AtomicU32::new(0));
+    let result_exit = command_exit.clone();
+    let view_exit = command_exit.clone();
     gpui_platform::application().run(move |cx| {
         cx.on_window_closed(|cx, _| {
             if cx.windows().is_empty() {
@@ -442,21 +462,28 @@ fn run() -> Result<()> {
                 ..Default::default()
             },
             move |window, cx| {
-                cx.new(|cx| Desktop::new(setup, settings, options.command, window, cx))
+                let command_exit = view_exit.clone();
+                cx.new(|cx| {
+                    Desktop::new(setup, settings, options.command, command_exit, window, cx)
+                })
             },
         );
         if let Err(error) = result {
+            result_exit.store(1, Ordering::Release);
             eprintln!("Git-Terminal: {error}");
             cx.quit();
         } else {
             cx.activate(true);
         }
     });
-    Ok(())
+    Ok(command_exit.load(Ordering::Acquire))
 }
 fn main() {
-    if let Err(error) = run() {
-        eprintln!("Git-Terminal: {error:#}");
-        std::process::exit(1);
+    match run() {
+        Ok(code) => std::process::exit(code as i32),
+        Err(error) => {
+            eprintln!("Git-Terminal: {error:#}");
+            std::process::exit(1);
+        }
     }
 }
