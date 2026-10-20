@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Git-Terminal</title><style>body{max-width:900px;margin:50px auto;padding:0 24px;background:#12151b;color:#d9e1eb;font:16px/1.6 system-ui}a{color:#91bcff}code,pre{background:#202936;padding:3px 6px;border-radius:5px}pre{padding:18px;overflow:auto}nav{display:flex;gap:24px}h1{font-size:40px}</style></head><body>
+<nav><a href="index.html">Git-Terminal</a><a href="../../README.md">CLI and shortcuts</a><a href="../../AGENTS.md">Engineering contracts</a></nav>
+<h1>Git-Terminal</h1><p>A native Rust + GPUI Fast terminal installed with the Windows git-next MSI. Real ConPTY sessions render inside the application. Bash, PowerShell and CMD share the installed git-next runtime.</p>
+<p>Tabs, Unicode and Chinese input, ANSI/true color, selection, scrollback, bracketed paste, copy/paste, zoom and resize are part of the terminal. There is no Git GUI interface.</p>
+<pre>git-terminal --cwd D:\Code\project
+git-terminal --shell powershell
+git-terminal --print-setup --json
+git-terminal language set chinese
+git-terminal language set english
+git-terminal language get</pre>
+<p>Ctrl+Shift+T/W manages tabs, Ctrl+Tab switches, Ctrl+Shift+C/V copies/pastes, Shift+PageUp/PageDown scrolls and Ctrl +/- zooms. Drag, double click or triple click selects. Shift bypasses application mouse reporting.</p>
+<p>Settings: <code>%APPDATA%\git-terminal\settings.json</code>. Language follows the system until selected. The bundled default is owned Bash. Shell profiles and credential storage retain their normal locations.</p>
+<p>Git-Terminal is a peer Git submodule of git-next. Local formatting, lint, PTY, desktop and MSI checks provide release evidence. Compilation is distinct from runtime acceptance. <a href="../../vendor/gpui-terminal/MODIFICATIONS.md">Attribution and changes</a>.</p>
+</body></html>

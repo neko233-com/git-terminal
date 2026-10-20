@@ -1,0 +1,17 @@
+# Attributed terminal component
+
+Source: https://github.com/zortax/gpui-terminal, crates.io release 0.1.0.
+Copyright Leonard Seibold. Original MIT / Apache-2.0 licenses are preserved.
+
+Local changes by git-next contributors, 2026:
+
+- Pin GPUI Fast 0.1.10 and adapt text, focus and input APIs.
+- Add native IME commit/composition and caret geometry, copy/paste and bracketed paste.
+- Implement mouse selection, semantic/line selection, history and application mouse reports.
+- Render historical viewport rows and selected cells; preserve hidden cursor behavior.
+- Bound the PTY reader queue and coalesce output before renderer notification.
+- Route protocol replies, color queries and size requests back to the owned PTY.
+- Apply configured scrollback and keep lifecycle under the host application.
+
+Alacritty provides VT parsing and grid semantics. Portable-pty provides ConPTY.
+The host owns shells, tabs, Windows jobs, settings and installation integration.
