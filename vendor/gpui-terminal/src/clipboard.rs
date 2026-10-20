@@ -161,6 +161,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "The native desktop acceptance lane preserves/restores the system clipboard and verifies copy/paste."]
     fn test_clipboard_copy_paste() {
         // This test may fail in CI environments without display server
         let Ok(mut clipboard) = Clipboard::new() else {
@@ -193,6 +194,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Mutates the system clipboard; only the serial native desktop acceptance lane may do this."]
     fn test_clipboard_clear() {
         // This test may fail in CI environments without display server
         let Ok(mut clipboard) = Clipboard::new() else {
