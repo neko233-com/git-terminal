@@ -247,7 +247,8 @@ impl Session {
             .context("PTY child identity is missing")
             .and_then(OwnedJob::new)
         {
-            Ok(job) => job,
+            Ok(job) => Some(job),
+            Err(_) if child.try_wait()?.is_some() => None,
             Err(error) => {
                 let _ = child.kill();
                 let _ = child.wait();
@@ -257,6 +258,8 @@ impl Session {
         let killer = child.clone_killer();
         let exit = Arc::new(parking_lot::Mutex::new(None));
         let status = exit.clone();
+        let ready = Arc::new(parking_lot::Condvar::new());
+        let notify_ready = ready.clone();
         let writer = pair.master.take_writer()?;
         let reader = pair.master.try_clone_reader()?;
         drop(pair.slave);
@@ -265,6 +268,7 @@ impl Session {
         std::thread::spawn(move || {
             let result = child.wait();
             *status.lock() = Some(result.map(|s| s.exit_code()).unwrap_or(1));
+            notify_ready.notify_all();
             // Close ConPTY off the UI thread so its reader can drain and receive EOF.
             drop(close_master.lock().take());
         });
@@ -272,13 +276,47 @@ impl Session {
             Self {
                 master,
                 killer,
-                exit,
+                exit: exit.clone(),
                 #[cfg(windows)]
-                job: Some(job),
+                job,
             },
             writer,
-            reader,
+            Box::new(ExitAwareReader {
+                inner: reader,
+                status: exit,
+                ready,
+            }),
         ))
+    }
+}
+
+struct ExitAwareReader {
+    inner: Box<dyn Read + Send>,
+    status: Arc<parking_lot::Mutex<Option<u32>>>,
+    ready: Arc<parking_lot::Condvar>,
+}
+
+impl Read for ExitAwareReader {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        let count = match self.inner.read(buffer) {
+            Ok(count) => count,
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::UnexpectedEof
+                ) =>
+            {
+                0
+            }
+            Err(error) => return Err(error),
+        };
+        if count == 0 && !buffer.is_empty() {
+            let mut status = self.status.lock();
+            while status.is_none() {
+                self.ready.wait(&mut status);
+            }
+        }
+        Ok(count)
     }
 }
 

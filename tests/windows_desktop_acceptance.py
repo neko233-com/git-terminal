@@ -164,8 +164,14 @@ def main():
         env.update(HOME=str(home),USERPROFILE=str(home),APPDATA=str(home/'appdata'),LOCALAPPDATA=str(home/'local'),XDG_CONFIG_HOME=str(home/'.config'),GIT_CONFIG_GLOBAL=str(home/'.gitconfig'),GIT_NEXT_CONFIG_HOME=str(home/'git-next'),SSH_ROOT_PATH=str(home/'.ssh'),GIT_TERMINAL_PROMPT='0',GCM_INTERACTIVE='never')
         def record(name,action):
             then=time.monotonic()
-            try:action();results.append(dict(case=name,status='pass',seconds=round(time.monotonic()-then,3)))
-            except (AssertionError,OSError,ValueError,subprocess.SubprocessError):results.append(dict(case=name,status='fail',seconds=round(time.monotonic()-then,3)))
+            try:
+                if process and process.poll() is None:
+                    owned=window_for(process.pid)
+                    if owned:
+                        u.SetForegroundWindow(owned);wait_for(lambda:u.GetForegroundWindow()==owned,2)
+                action();results.append(dict(case=name,status='pass',seconds=round(time.monotonic()-then,3)))
+            except (AssertionError,OSError,ValueError,subprocess.SubprocessError) as error:
+                results.append(dict(case=name,status='fail',error_type=type(error).__name__,reason=str(error)[:180],seconds=round(time.monotonic()-then,3)))
         def cli():
             value=subprocess.run([str(binary),'--print-setup','--json','--no-profile','--git',str(git),'--cwd',str(repo)],env=env,capture_output=True,timeout=15)
             assert value.returncode==0
@@ -214,6 +220,7 @@ def main():
                 image.save(output.with_suffix('.png'))
             record('actual-gpui-gpu-window-chinese-and-color-screenshot',rendering)
             def selection():
+                assert clipboard_saved, "Clipboard snapshot is required before copy"
                 image=ImageGrab.grab(bbox=bounds(hwnd));x0,y0,x1,y1=bounds(hwnd);scale=u.GetDpiForWindow(hwnd)/96
                 background=image.getpixel((image.width-3,image.height//2))
                 top=next(y for y in range(10,min(200,image.height//2)) if all(image.getpixel((image.width-3,y+offset))==background for offset in range(5)))
@@ -267,14 +274,16 @@ def main():
         def profiles():
             for profile,command_text in [('powershell',"[IO.File]::WriteAllText('"+(root/'powershell.txt').as_posix()+"','powershell-ok')"),('bash',"printf 'bash-ok' > '"+(root/'bash.txt').as_posix()+"'"),('cmd','echo cmd-ok>"'+str(root/'cmd.txt')+'"')]:
                 p=subprocess.Popen([str(binary),'--shell',profile,'--no-profile','--git',str(git),'--cwd',str(repo),'--command',command_text],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-                try:assert p.wait(timeout=20)==0
+                try:
+                    status=p.wait(timeout=20);assert status==0,profile+" command exit="+str(status)
                 finally:
                     if p.poll() is None:subprocess.run([os.path.join(os.environ['SystemRoot'],'System32/taskkill.exe'),'/PID',str(p.pid),'/T','/F'],capture_output=True,timeout=10)
                 assert (root/(profile+'.txt')).read_text().strip()==profile+'-ok'
         record('owned-bash-and-native-cmd-real-gui-pty-exit',profiles)
         def exit_status():
             p=subprocess.Popen([str(binary),'--shell','cmd','--no-profile','--git',str(git),'--cwd',str(repo),'--command','exit 7'],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-            try:assert p.wait(timeout=20)==7
+            try:
+                status=p.wait(timeout=20);assert status==7,"command exit="+str(status)
             finally:
                 if p.poll() is None:subprocess.run([os.path.join(os.environ['SystemRoot'],'System32/taskkill.exe'),'/PID',str(p.pid),'/T','/F'],capture_output=True,timeout=10)
         record('explicit-command-exit-status-propagation',exit_status)

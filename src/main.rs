@@ -146,10 +146,10 @@ impl Desktop {
                     let title: String =
                         title.chars().filter(|c| !c.is_control()).take(80).collect();
                     let _ = title_parent.update(cx, |app, cx| {
-                        if let Some(tab) = app.tabs.iter_mut().find(|t| t.id == id) {
-                            if !title.is_empty() {
-                                tab.label = title;
-                            }
+                        if let Some(tab) = app.tabs.iter_mut().find(|t| t.id == id)
+                            && !title.is_empty()
+                        {
+                            tab.label = title;
                         }
                         window.set_window_title("Git-Terminal");
                         cx.notify();
