@@ -12,6 +12,7 @@ Local changes by git-next contributors, 2026:
 - Bound the PTY reader queue and coalesce output before renderer notification.
 - Route protocol replies, color queries and size requests back to the owned PTY.
 - Apply configured scrollback and keep lifecycle under the host application.
+- Reserve host tab shortcuts Ctrl+T/W, Ctrl+Shift+T/W and Ctrl+Tab before PTY input.
 
 Alacritty provides VT parsing and grid semantics. Portable-pty provides ConPTY.
 The host owns shells, tabs, Windows jobs, settings and installation integration.

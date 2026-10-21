@@ -93,6 +93,7 @@ fn shell_features_real_pty() {
         .to_owned();
     let mut setup = Setup::discover(&nested, "bash", Some(&git)).unwrap();
     setup.no_profile = true;
+    setup.integration = Some(git.parent().unwrap().join("shell-integration"));
     let (session, mut writer, mut reader) = Session::spawn(&setup, None).unwrap();
     let (bytes_tx, bytes_rx) = mpsc::sync_channel(32);
     let read_task = std::thread::spawn(move || {
@@ -145,7 +146,7 @@ fn shell_features_real_pty() {
                 return;
             }
         }
-        panic!("generated interactive shell fixture did not become ready");
+        panic!("generated interactive shell fixture did not become ready: {needle}");
     };
     pump(&mut terminal, &mut writer, &mut received, "❯");
     writer.write_all(b"builtin printf '\\107\\124_READY:%s:%s\\n' \"$BLE_VERSION\" \"$__git_terminal_branch\"\r").unwrap();
@@ -235,6 +236,7 @@ fn shell_features_real_pty() {
     read_task.join().unwrap();
     let mut powershell = Setup::discover(&nested, "powershell", Some(&git)).unwrap();
     powershell.no_profile = true;
+    powershell.integration = setup.integration.clone();
     let (session, mut writer, mut reader) = Session::spawn(&powershell, None).unwrap();
     let (tx, rx) = mpsc::sync_channel(32);
     let reader_task = std::thread::spawn(move || {

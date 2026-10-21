@@ -42,6 +42,7 @@ u.GetClipboardOwner.restype = w.HWND
 u.AttachThreadInput.argtypes = [w.DWORD,w.DWORD,w.BOOL]
 u.SetFocus.argtypes = [w.HWND]
 u.SetFocus.restype = w.HWND
+u.ShowWindow.argtypes = [w.HWND,c.c_int]
 k.GetCurrentThreadId.restype = w.DWORD
 WINDOW_OWNERS = {}
 
@@ -98,6 +99,7 @@ def focused(hwnd):
 def activate_owned(hwnd):
     actual=w.DWORD();target_thread=u.GetWindowThreadProcessId(hwnd,c.byref(actual))
     assert actual.value==WINDOW_OWNERS.get(hwnd), 'Window ownership changed; activation refused'
+    u.ShowWindow(hwnd,9)
     current=k.GetCurrentThreadId();foreground=u.GetForegroundWindow()
     foreground_thread=u.GetWindowThreadProcessId(foreground,None) if foreground else 0
     attached=[]
@@ -143,6 +145,7 @@ def command(hwnd,text):
 def bounds(hwnd):
     rect=w.RECT();point=w.POINT()
     assert u.GetClientRect(hwnd,c.byref(rect)) and u.ClientToScreen(hwnd,c.byref(point))
+    assert rect.right>=500 and rect.bottom>=250, 'Owned terminal window is not available for capture'
     return point.x,point.y,point.x+rect.right,point.y+rect.bottom
 
 
@@ -189,7 +192,7 @@ def main():
                     if owned:
                         activate_owned(owned)
                 action();results.append(dict(case=name,status='pass',seconds=round(time.monotonic()-then,3)))
-            except (AssertionError,OSError,ValueError,subprocess.SubprocessError) as error:
+            except (AssertionError,OSError,ValueError,IndexError,subprocess.SubprocessError) as error:
                 results.append(dict(case=name,status='fail',error_type=type(error).__name__,reason=str(error)[:180],seconds=round(time.monotonic()-then,3)))
         def cli():
             value=subprocess.run([str(binary),'--print-setup','--json','--no-profile','--git',str(git),'--cwd',str(repo)],env=env,capture_output=True,timeout=15)
@@ -199,41 +202,46 @@ def main():
                 p=subprocess.run([str(binary),'language','set',language],env=env,capture_output=True,timeout=10);assert p.returncode==0 and json.loads(p.stdout)['configured']==language
         record('identity-profiles-unicode-cwd-language-atomic-settings',cli)
         try:
-            process=subprocess.Popen([str(binary),'--shell','cmd','--no-profile','--git',str(git),'--cwd',str(repo)],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+            subprocess.run([str(git),'init','--initial-branch=feature/tabs',str(repo)],env=env,capture_output=True,check=True,timeout=10)
+            process=subprocess.Popen([str(binary),'--no-profile','--git',str(git),'--cwd',str(repo)],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
             hwnd=wait_for(lambda:window_for(process.pid));u.SetWindowPos(hwnd,None,40,40,1120,720,4);activate_owned(hwnd)
-            time.sleep(1)
+            time.sleep(2)
+            def quote(path):
+                return "'"+str(path).replace('\\','/').replace("'","'\\''")+"'"
             def powershell(source):
                 executable=os.path.join(os.environ['SystemRoot'],'System32/WindowsPowerShell/v1.0/powershell.exe')
                 return '"'+executable+'" -NoLogo -NoProfile -NonInteractive -Command "'+source+'"'
             def typed():
-                path=root/'unicode.txt';command(hwnd,powershell("[IO.File]::WriteAllText('"+path.as_posix()+"','中文🙂')"))
+                path=root/'unicode.txt';command(hwnd,"printf '%s' '中文🙂' > "+quote(path))
                 wait_for(path.exists);assert path.read_text(encoding='utf-8')=='中文🙂'
             record('real-window-native-unicode-text-input-and-pty',typed)
             def paste():
                 nonlocal clipboard_saved,fixture_clipboard
                 focused(hwnd)
                 assert ole.OleGetClipboard(c.byref(original_clipboard))>=0;clipboard_saved=True
-                path=root/'clipboard.txt';fixture_clipboard=powershell("[IO.File]::WriteAllText('"+path.as_posix()+"','clipboard-中文')");set_clipboard(hwnd,fixture_clipboard)
+                path=root/'clipboard.txt';fixture_clipboard="printf '%s' 'clipboard-中文' > "+quote(path);set_clipboard(hwnd,fixture_clipboard)
                 shortcut(hwnd,0x11,0x10,0x56);shortcut(hwnd,0x0D);wait_for(path.exists);assert path.read_text(encoding='utf-8')=='clipboard-中文'
             record('native-clipboard-paste-with-original-preserved-in-memory',paste)
             def tabs():
                 first=root/'first.txt';second=root/'second.txt';returned=root/'returned.txt'
-                command(hwnd,'set GIT_TERMINAL_TAB=first& echo first>"'+str(first)+'"');wait_for(first.exists)
-                shortcut(hwnd,0x11,0x10,0x54);time.sleep(1)
-                command(hwnd,'if defined GIT_TERMINAL_TAB (echo leaked>"'+str(second)+'") else (echo independent>"'+str(second)+'")');wait_for(second.exists)
+                command(hwnd,"GIT_TERMINAL_TAB=first; printf first > "+quote(first));wait_for(first.exists)
+                shortcut(hwnd,0x11,0x54);time.sleep(1)
+                command(hwnd,"printf '%s' \"${GIT_TERMINAL_TAB-independent}\" > "+quote(second));wait_for(second.exists)
                 assert second.read_text().strip()=='independent'
-                shortcut(hwnd,0x11,0x10,0x57);time.sleep(.3)
-                command(hwnd,'echo %GIT_TERMINAL_TAB%>"'+str(returned)+'"');wait_for(returned.exists);assert returned.read_text().strip()=='first'
+                shortcut(hwnd,0x11,0x09);time.sleep(.15)
+                shortcut(hwnd,0x11,0x10,0x09);time.sleep(.15)
+                shortcut(hwnd,0x11,0x57);time.sleep(.3)
+                command(hwnd,"printf '%s' \"$GIT_TERMINAL_TAB\" > "+quote(returned));wait_for(returned.exists);assert returned.read_text().strip()=='first'
             record('native-keyboard-tabs-independent-shells-and-close',tabs)
             def resize():
                 before=root/'width-before.txt';after=root/'width-after.txt'
-                command(hwnd,powershell("[IO.File]::WriteAllText('"+before.as_posix()+"',[string][Console]::WindowWidth)"));wait_for(before.exists)
+                command(hwnd,"printf '%s' \"$COLUMNS\" > "+quote(before));wait_for(before.exists)
                 u.SetWindowPos(hwnd,None,40,40,920,650,4);time.sleep(.5)
-                command(hwnd,powershell("[IO.File]::WriteAllText('"+after.as_posix()+"',[string][Console]::WindowWidth)"));wait_for(after.exists)
+                command(hwnd,"printf '%s' \"$COLUMNS\" > "+quote(after));wait_for(after.exists)
                 assert int(before.read_text())!=int(after.read_text())
             record('native-window-resize-reaches-conpty',resize)
             def rendering():
-                ready=root/'render.txt';command(hwnd,"prompt git-next$G$S& cls& color 0B& echo Git-Terminal 中文 / UTF-8& echo COPY_MARKER_GIT_TERMINAL& "+powershell("[IO.File]::WriteAllText('"+ready.as_posix()+"','ready')"))
+                ready=root/'render.txt';command(hwnd,"printf '\\033[2J\\033[HGit-Terminal 中文 / UTF-8\\nCOPY_MARKER_GIT_TERMINAL\\n'; printf ready > "+quote(ready))
                 wait_for(ready.exists);time.sleep(.4)
                 image=ImageGrab.grab(bbox=bounds(hwnd));assert len(image.getcolors(image.width*image.height) or [])>20
                 image.save(output.with_suffix('.png'))
@@ -259,8 +267,7 @@ def main():
                 assert copied
             record('native-mouse-selection-and-copy',selection)
             def history():
-                ready=root/'history.txt';command(hwnd,'for /l %I in (1,1,180) do @echo history-%I')
-                command(hwnd,'echo ready>"'+str(ready)+'"');wait_for(ready.exists);time.sleep(.3)
+                ready=root/'history.txt';command(hwnd,"printf 'history-%s\\n' {1..180}; printf ready > "+quote(ready));wait_for(ready.exists);time.sleep(.3)
                 image=ImageGrab.grab(bbox=bounds(hwnd));region=(5,100,min(360,image.width),image.height-45)
                 before=hashlib.sha256(image.crop(region).tobytes()).hexdigest()
                 shortcut(hwnd,0x10,0x21);time.sleep(.25)
@@ -271,28 +278,40 @@ def main():
                 wheel=hashlib.sha256(ImageGrab.grab(bbox=bounds(hwnd)).crop(region).tobytes()).hexdigest();assert wheel!=before
             record('native-shift-page-and-mouse-wheel-scrollback',history)
         finally:
-            if clipboard_saved:
-                owner=u.GetClipboardOwner();owner_pid=w.DWORD()
-                if owner:u.GetWindowThreadProcessId(owner,c.byref(owner_pid))
-                owned_text=clipboard_text()
-                if owner_pid.value in (os.getpid(),process.pid if process else 0) or owned_text==fixture_clipboard or owned_text.strip()=='COPY_MARKER_GIT_TERMINAL':
-                    restored=ole.OleSetClipboard(original_clipboard)
-                    if restored>=0:restored=ole.OleFlushClipboard()
-                    results.append(dict(case='original-clipboard-restored',status='pass' if restored>=0 else 'fail'))
-                else:
-                    results.append(dict(case='new-external-clipboard-change-preserved',status='pass'))
+            try:
+                if clipboard_saved:
+                    deadline=time.monotonic()+3
+                    while True:
+                        try:
+                            owner=u.GetClipboardOwner();owner_pid=w.DWORD()
+                            if owner:u.GetWindowThreadProcessId(owner,c.byref(owner_pid))
+                            owned_text=clipboard_text()
+                            if owner_pid.value in (os.getpid(),process.pid if process else 0) or owned_text==fixture_clipboard or owned_text.strip()=='COPY_MARKER_GIT_TERMINAL':
+                                restored=ole.OleSetClipboard(original_clipboard)
+                                if restored>=0:restored=ole.OleFlushClipboard()
+                                assert restored>=0, 'Original clipboard restoration was refused'
+                                results.append(dict(case='original-clipboard-restored',status='pass'))
+                            else:
+                                results.append(dict(case='new-external-clipboard-change-preserved',status='pass'))
+                            break
+                        except (OSError,AssertionError):
+                            if time.monotonic()>=deadline:
+                                results.append(dict(case='original-clipboard-restored',status='fail',reason='Clipboard remained busy'))
+                                break
+                            time.sleep(.1)
+            finally:
                 if original_clipboard:
                     table=c.cast(original_clipboard,c.POINTER(c.POINTER(c.c_void_p))).contents
                     c.WINFUNCTYPE(w.ULONG,c.c_void_p)(table[2])(original_clipboard)
-            if process:
-                hwnd=window_for(process.pid)
-                if hwnd:u.PostMessageW(hwnd,0x10,0,0)
-                try:process.wait(timeout=15)
-                except subprocess.TimeoutExpired:
-                    subprocess.run([os.path.join(os.environ['SystemRoot'],'System32/taskkill.exe'),'/PID',str(process.pid),'/T','/F'],capture_output=True,timeout=10)
-                    process.wait(timeout=5)
-                    results.append(dict(case='owned-window-exit-and-process-cleanup',status='fail'))
-                else:results.append(dict(case='owned-window-exit-and-process-cleanup',status='pass'))
+                if process:
+                    hwnd=window_for(process.pid)
+                    if hwnd:u.PostMessageW(hwnd,0x10,0,0)
+                    try:process.wait(timeout=15)
+                    except subprocess.TimeoutExpired:
+                        subprocess.run([os.path.join(os.environ['SystemRoot'],'System32/taskkill.exe'),'/PID',str(process.pid),'/T','/F'],capture_output=True,timeout=10)
+                        process.wait(timeout=5)
+                        results.append(dict(case='owned-window-exit-and-process-cleanup',status='fail'))
+                    else:results.append(dict(case='owned-window-exit-and-process-cleanup',status='pass'))
         def profiles():
             for profile,command_text in [('powershell',"[IO.File]::WriteAllText('"+(root/'powershell.txt').as_posix()+"','powershell-ok')"),('bash',"printf 'bash-ok' > '"+(root/'bash.txt').as_posix()+"'"),('cmd','echo cmd-ok>"'+str(root/'cmd.txt')+'"')]:
                 p=subprocess.Popen([str(binary),'--shell',profile,'--no-profile','--git',str(git),'--cwd',str(repo),'--command',command_text],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)

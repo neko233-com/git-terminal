@@ -771,8 +771,7 @@ impl TerminalView {
     fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let k = &event.keystroke;
         if k.modifiers.control
-            && ((k.modifiers.shift && matches!(k.key.as_str(), "t" | "w"))
-                || matches!(k.key.as_str(), "tab" | "=" | "+" | "-" | "0"))
+            && matches!(k.key.as_str(), "t" | "w" | "tab" | "=" | "+" | "-" | "0")
         {
             return;
         }

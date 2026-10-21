@@ -13,6 +13,16 @@ if [[ ${GIT_TERMINAL_LOAD_PROFILE:-1} == 1 ]]; then
 fi
 if [[ ${GIT_TERMINAL_SYNTAX_HIGHLIGHTING:-1} == 1 && -r $__git_terminal_integration_dir/blesh/ble.sh ]]; then
   builtin source "$__git_terminal_integration_dir/blesh/ble.sh" --noattach
+  ble-face -s syntax_command 'fg=117'
+  ble-face -s command_builtin 'fg=117'
+  ble-face -s command_file 'fg=117'
+  ble-face -s command_alias 'fg=117'
+  ble-face -s syntax_quoted 'fg=150'
+  ble-face -s syntax_quotation 'fg=150'
+  ble-face -s syntax_varname 'fg=180'
+  ble-face -s syntax_param_expansion 'fg=180'
+  ble-face -s syntax_comment 'fg=244'
+  ble-face -s syntax_error 'fg=210,underline'
 fi
 if [[ ${GIT_TERMINAL_GIT_PROMPT:-1} == 1 ]]; then
   builtin source "$__git_terminal_integration_dir/prompt.bash"

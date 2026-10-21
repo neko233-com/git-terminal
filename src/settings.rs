@@ -17,7 +17,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             language: "auto".into(),
-            font_size: 14.,
+            font_size: 16.,
             font_family: if cfg!(windows) {
                 "Consolas"
             } else {

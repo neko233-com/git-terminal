@@ -1,5 +1,6 @@
 // Copyright 2026 git-next contributors. MIT license.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod presentation;
 mod session;
 mod settings;
 #[cfg(all(test, windows))]
@@ -9,6 +10,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use gpui::*;
 use gpui_terminal::{ColorPalette, TerminalConfig, TerminalView};
+use presentation::{TabContext, profile_name};
 use session::{Session, Setup};
 use settings::Settings;
 use std::path::PathBuf;
@@ -65,7 +67,7 @@ enum LanguageAction {
 
 struct Tab {
     id: u64,
-    label: String,
+    context: TabContext,
     _session: Session,
     terminal: Entity<TerminalView>,
 }
@@ -77,6 +79,8 @@ struct Desktop {
     settings: Settings,
     error: Option<String>,
     command_exit: Arc<AtomicU32>,
+    profile_menu: bool,
+    tab_scroll: ScrollHandle,
 }
 
 impl Desktop {
@@ -96,12 +100,21 @@ impl Desktop {
             settings,
             error: None,
             command_exit,
+            profile_menu: false,
+            tab_scroll: ScrollHandle::new(),
         };
+        presentation::dark_caption();
         desktop.add_tab(command, window, cx);
         desktop
     }
     fn add_tab(&mut self, command: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
-        let result = Session::spawn(&self.setup, command.as_deref());
+        let mut setup = self.setup.clone();
+        if command.is_none()
+            && let Some(tab) = self.tabs.get(self.active)
+        {
+            setup.cwd = tab.context.cwd.clone();
+        }
+        let result = Session::spawn(&setup, command.as_deref());
         let (session, writer, reader) = match result {
             Ok(v) => v,
             Err(e) => {
@@ -126,12 +139,20 @@ impl Desktop {
             font_family: self.settings.font_family.clone(),
             font_size: px(self.settings.font_size),
             scrollback: self.settings.scrollback,
-            line_height_multiplier: 1.2,
-            padding: Edges::all(px(12.)),
+            line_height_multiplier: 1.25,
+            padding: Edges::all(px(18.)),
             colors: ColorPalette::builder()
-                .background(0x12, 0x15, 0x1b)
-                .foreground(0xd9, 0xe1, 0xeb)
-                .cursor(0x91, 0xbc, 0xff)
+                .background(0x0e, 0x11, 0x18)
+                .foreground(0xdf, 0xe7, 0xf3)
+                .cursor(0x7c, 0xb7, 0xff)
+                .red(0xf0, 0x86, 0x91)
+                .green(0x9a, 0xcf, 0xa0)
+                .yellow(0xe9, 0xc4, 0x8a)
+                .blue(0x7c, 0xb7, 0xff)
+                .magenta(0xc4, 0xa5, 0xef)
+                .cyan(0x85, 0xcb, 0xcf)
+                .white(0xdf, 0xe7, 0xf3)
+                .bright_black(0x8c, 0x9a, 0xb0)
                 .build(),
         };
         let terminal = cx.new(|cx| {
@@ -147,13 +168,9 @@ impl Desktop {
                     }
                 })
                 .with_title_callback(move |window, cx, title| {
-                    let title: String =
-                        title.chars().filter(|c| !c.is_control()).take(80).collect();
                     let _ = title_parent.update(cx, |app, cx| {
-                        if let Some(tab) = app.tabs.iter_mut().find(|t| t.id == id)
-                            && !title.is_empty()
-                        {
-                            tab.label = title;
+                        if let Some(tab) = app.tabs.iter_mut().find(|t| t.id == id) {
+                            tab.context.update(title);
                         }
                         window.set_window_title("Git-Terminal");
                         cx.notify();
@@ -167,8 +184,7 @@ impl Desktop {
                     let handle = window.window_handle();
                     cx.spawn(async move |_, cx| {
                         let _ = parent.update(cx, |app, cx| {
-                            app.tabs.retain(|t| t.id != id);
-                            app.active = app.active.min(app.tabs.len().saturating_sub(1));
+                            app.remove_tab(id);
                             if app.tabs.is_empty() {
                                 let _ = handle.update(cx, |_, window, _| window.remove_window());
                             }
@@ -181,11 +197,13 @@ impl Desktop {
         terminal.read(cx).focus_handle().clone().focus(window, cx);
         self.tabs.push(Tab {
             id,
-            label: self.setup.profile.clone(),
+            context: TabContext::new(setup.cwd, setup.profile),
             _session: session,
             terminal,
         });
         self.active = self.tabs.len() - 1;
+        self.tab_scroll.scroll_to_item(self.active);
+        self.profile_menu = false;
         self.error = None;
         cx.notify();
     }
@@ -199,8 +217,7 @@ impl Desktop {
         }
     }
     fn close(&mut self, id: u64, window: &mut Window, cx: &mut Context<Self>) {
-        self.tabs.retain(|t| t.id != id);
-        self.active = self.active.min(self.tabs.len().saturating_sub(1));
+        self.remove_tab(id);
         if self.tabs.is_empty() {
             window.remove_window();
         } else {
@@ -208,23 +225,36 @@ impl Desktop {
         }
         cx.notify();
     }
+    fn remove_tab(&mut self, id: u64) {
+        let selected = self.tabs.get(self.active).map(|tab| tab.id);
+        self.tabs.retain(|tab| tab.id != id);
+        self.active = selected
+            .and_then(|id| self.tabs.iter().position(|tab| tab.id == id))
+            .unwrap_or_else(|| self.active.min(self.tabs.len().saturating_sub(1)));
+        self.tab_scroll.scroll_to_item(self.active);
+    }
     fn key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let k = &event.keystroke;
         let mut handled = true;
-        if k.modifiers.control && k.modifiers.shift && k.key == "t" {
+        if k.key == "escape" && self.profile_menu {
+            self.profile_menu = false;
+            self.focus(window, cx);
+            cx.notify();
+        } else if k.modifiers.control && k.key == "t" {
             self.add_tab(None, window, cx);
-        } else if k.modifiers.control && k.modifiers.shift && k.key == "w" {
+        } else if k.modifiers.control && k.key == "w" {
             if let Some(t) = self.tabs.get(self.active) {
                 self.close(t.id, window, cx);
             }
         } else if k.modifiers.control && k.key == "tab" && !self.tabs.is_empty() {
             let n = self.tabs.len();
             self.active = (self.active + if k.modifiers.shift { n - 1 } else { 1 }) % n;
+            self.tab_scroll.scroll_to_item(self.active);
             self.focus(window, cx);
             cx.notify();
         } else if k.modifiers.control && matches!(k.key.as_str(), "=" | "+" | "-" | "0") {
             self.settings.font_size = if k.key == "0" {
-                14.
+                16.
             } else {
                 (self.settings.font_size + if k.key == "-" { -1. } else { 1. }).clamp(8., 48.)
             };
@@ -247,7 +277,12 @@ impl Desktop {
         match Setup::discover(&self.setup.cwd, profile, self.setup.git.as_deref()) {
             Ok(mut setup) => {
                 setup.no_profile = self.setup.no_profile;
+                setup.integration = self.setup.integration.clone();
+                setup.syntax_highlighting = self.settings.syntax_highlighting;
+                setup.git_prompt = self.settings.git_prompt;
                 self.setup = setup;
+                self.settings.shell = profile.into();
+                let _ = self.settings.save();
                 self.add_tab(None, window, cx);
             }
             Err(e) => {
@@ -262,11 +297,14 @@ impl Render for Desktop {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let chinese = self.settings.chinese();
         let mut tabs = div()
+            .id("tabs")
             .flex()
             .items_center()
-            .gap_1()
+            .gap(px(4.))
             .flex_1()
-            .overflow_hidden();
+            .min_w_0()
+            .overflow_x_scroll()
+            .track_scroll(&self.tab_scroll);
         for (index, tab) in self.tabs.iter().enumerate() {
             let id = tab.id;
             let active = index == self.active;
@@ -275,22 +313,54 @@ impl Render for Desktop {
                     .id(("tab", id))
                     .flex()
                     .items_center()
-                    .gap_3()
+                    .gap_2()
+                    .flex_shrink_0()
+                    .h(px(40.))
+                    .min_w(px(148.))
+                    .max_w(px(300.))
                     .px_3()
-                    .py_2()
-                    .rounded_md()
-                    .bg(rgb(if active { 0x283342 } else { 0x1a202a }))
+                    .rounded_t_md()
+                    .border_b_2()
+                    .border_color(rgb(if active { 0x7cb7ff } else { 0x171c26 }))
+                    .bg(rgb(if active { 0x252e3f } else { 0x171c26 }))
+                    .text_color(rgb(if active { 0xdfe7f3 } else { 0x8c9ab0 }))
                     .cursor_pointer()
+                    .hover(|s| s.bg(rgb(0x252e3f)).text_color(rgb(0xdfe7f3)))
                     .on_click(cx.listener(move |app, _, window, cx| {
                         app.active = index;
                         app.focus(window, cx);
                         cx.notify();
                     }))
-                    .child(div().max_w_64().overflow_hidden().child(tab.label.clone()))
+                    .child(div().text_color(rgb(0x7cb7ff)).child("›_"))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .overflow_hidden()
+                            .text_ellipsis()
+                            .child(tab.context.label.clone()),
+                    )
+                    .children(tab.context.branch.as_ref().map(|branch| {
+                        div()
+                            .max_w(px(110.))
+                            .overflow_hidden()
+                            .text_ellipsis()
+                            .text_size(px(11.))
+                            .text_color(rgb(0xc4a5ef))
+                            .child(branch.clone())
+                    }))
                     .child(
                         div()
                             .id(("close", id))
-                            .px_1()
+                            .w(px(24.))
+                            .h(px(24.))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded_sm()
+                            .text_size(px(17.))
+                            .text_color(rgb(0x8c9ab0))
+                            .hover(|s| s.bg(rgb(0x3a455a)).text_color(rgb(0xdfe7f3)))
                             .child("×")
                             .on_click(cx.listener(move |app, _, window, cx| {
                                 cx.stop_propagation();
@@ -299,7 +369,7 @@ impl Render for Desktop {
                     ),
             );
         }
-        let mut profiles = div().flex().items_center().gap_1();
+        let mut profiles = div().flex().flex_col().gap_1();
         for profile in if cfg!(windows) {
             vec!["bash", "powershell", "cmd"]
         } else {
@@ -308,16 +378,20 @@ impl Render for Desktop {
             profiles = profiles.child(
                 div()
                     .id(SharedString::from(format!("profile-{profile}")))
-                    .px_2()
-                    .py_1()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_4()
+                    .px_3()
+                    .py_2()
                     .rounded_md()
                     .cursor_pointer()
                     .hover(|s| s.bg(rgb(0x2b3545)))
-                    .child(match profile {
-                        "powershell" => "PowerShell",
-                        "cmd" => "CMD",
-                        "bash" => "Bash",
-                        _ => "Shell",
+                    .child(profile_name(profile))
+                    .child(if self.setup.profile == profile {
+                        "✓"
+                    } else {
+                        ""
                     })
                     .on_click(
                         cx.listener(move |app, _, window, cx| app.shell(profile, window, cx)),
@@ -325,43 +399,63 @@ impl Render for Desktop {
             );
         }
         let terminal = self.tabs.get(self.active).map(|tab| tab.terminal.clone());
-        div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .bg(rgb(0x12151b))
-            .text_color(rgb(0xd9e1eb))
-            .font_family("Segoe UI")
-            .text_size(px(12.))
-            .on_key_down(cx.listener(Self::key))
-            .child(
+        let directory = self
+            .tabs
+            .get(self.active)
+            .map(|tab| tab.context.cwd.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let profile = self
+            .tabs
+            .get(self.active)
+            .map(|tab| profile_name(&tab.context.profile))
+            .unwrap_or("Shell");
+        let menu = self.profile_menu.then(|| {
+            deferred(
                 div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
+                    .id("profile-menu")
+                    .absolute()
+                    .top(px(49.))
+                    .right(px(10.))
+                    .w(px(240.))
                     .p_2()
-                    .bg(rgb(0x191f29))
-                    .child(tabs)
+                    .rounded_lg()
+                    .bg(rgb(0x202838))
+                    .border_1()
+                    .border_color(rgb(0x354157))
+                    .shadow_lg()
+                    .occlude()
+                    .on_mouse_down_out(cx.listener(|app, _, _, cx| {
+                        app.profile_menu = false;
+                        cx.notify();
+                    }))
                     .child(
                         div()
-                            .id("new-tab")
                             .px_3()
-                            .py_1()
-                            .cursor_pointer()
-                            .child("+")
-                            .on_click(
-                                cx.listener(|app, _, window, cx| app.add_tab(None, window, cx)),
-                            ),
+                            .py_2()
+                            .text_color(rgb(0x8c9ab0))
+                            .text_size(px(12.))
+                            .child(if chinese {
+                                "新建标签并设为默认"
+                            } else {
+                                "Open tab and set default"
+                            }),
                     )
                     .child(profiles)
+                    .child(div().h(px(1.)).my_2().bg(rgb(0x354157)))
                     .child(
                         div()
                             .id("language")
-                            .px_2()
-                            .py_1()
+                            .px_3()
+                            .py_2()
+                            .rounded_md()
                             .cursor_pointer()
-                            .child(if chinese { "中文" } else { "EN" })
-                            .on_click(cx.listener(|app, _, _, cx| {
+                            .hover(|s| s.bg(rgb(0x2b3545)))
+                            .child(if chinese {
+                                "界面语言　中文 / English"
+                            } else {
+                                "Language　English / 中文"
+                            })
+                            .on_click(cx.listener(|app, _, window, cx| {
                                 app.settings.language = if app.settings.chinese() {
                                     "english"
                                 } else {
@@ -369,6 +463,68 @@ impl Render for Desktop {
                                 }
                                 .into();
                                 let _ = app.settings.save();
+                                app.profile_menu = false;
+                                app.focus(window, cx);
+                                cx.notify();
+                            })),
+                    ),
+            )
+            .priority(1)
+        });
+        div()
+            .size_full()
+            .relative()
+            .flex()
+            .flex_col()
+            .bg(rgb(0x0e1118))
+            .text_color(rgb(0xdfe7f3))
+            .font_family("Segoe UI")
+            .text_size(px(13.))
+            .capture_key_down(cx.listener(Self::key))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .pt_2()
+                    .px_2()
+                    .h(px(48.))
+                    .flex_shrink_0()
+                    .bg(rgb(0x171c26))
+                    .child(tabs)
+                    .child(
+                        div()
+                            .id("new-tab")
+                            .w(px(36.))
+                            .h(px(36.))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .text_size(px(23.))
+                            .text_color(rgb(0x8c9ab0))
+                            .rounded_md()
+                            .hover(|s| s.bg(rgb(0x252e3f)).text_color(rgb(0xdfe7f3)))
+                            .cursor_pointer()
+                            .child("+")
+                            .on_click(
+                                cx.listener(|app, _, window, cx| app.add_tab(None, window, cx)),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .id("profiles")
+                            .w(px(28.))
+                            .h(px(36.))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded_md()
+                            .text_color(rgb(0x8c9ab0))
+                            .hover(|s| s.bg(rgb(0x252e3f)).text_color(rgb(0xdfe7f3)))
+                            .cursor_pointer()
+                            .child("⌄")
+                            .on_click(cx.listener(|app, _, _, cx| {
+                                app.profile_menu = !app.profile_menu;
                                 cx.notify();
                             })),
                     ),
@@ -388,26 +544,32 @@ impl Render for Desktop {
             .child(
                 div()
                     .flex()
+                    .items_center()
                     .justify_between()
-                    .px_3()
-                    .py_1()
-                    .bg(rgb(0x191f29))
-                    .text_color(rgb(0x8995a7))
-                    .child(if self.setup.git.is_some() {
-                        "git-next · GPUI Fast"
+                    .gap_4()
+                    .px_4()
+                    .h(px(30.))
+                    .flex_shrink_0()
+                    .border_t_1()
+                    .border_color(rgb(0x202838))
+                    .text_size(px(11.))
+                    .text_color(rgb(0x8c9ab0))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .overflow_hidden()
+                            .text_ellipsis()
+                            .child(directory),
+                    )
+                    .child(div().flex_shrink_0().child(if chinese {
+                        "新建 Ctrl+T    关闭 Ctrl+W"
                     } else {
-                        if chinese {
-                            "git-next 未安装 · GPUI Fast"
-                        } else {
-                            "git-next unavailable · GPUI Fast"
-                        }
-                    })
-                    .child(if chinese {
-                        "新标签 Ctrl+Shift+T · 复制/粘贴 Ctrl+Shift+C/V · 缩放 Ctrl +/-"
-                    } else {
-                        "New tab Ctrl+Shift+T · Copy/paste Ctrl+Shift+C/V · Zoom Ctrl +/-"
-                    }),
+                        "New Ctrl+T    Close Ctrl+W"
+                    }))
+                    .child(div().flex_shrink_0().child(profile)),
             )
+            .children(menu)
     }
 }
 
@@ -456,6 +618,7 @@ fn run() -> Result<u32> {
     let result_exit = command_exit.clone();
     let view_exit = command_exit.clone();
     gpui_platform::application().run(move |cx| {
+        cx.set_window_appearance(Some(WindowAppearance::Dark));
         cx.on_window_closed(|cx, _| {
             if cx.windows().is_empty() {
                 cx.quit();
@@ -466,6 +629,7 @@ fn run() -> Result<u32> {
         let result = cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
+                window_min_size: Some(size(px(560.), px(340.))),
                 titlebar: Some(TitlebarOptions {
                     title: Some("Git-Terminal".into()),
                     ..Default::default()

@@ -19,11 +19,11 @@ git-terminal language get
 
 The explicit --command argument runs a command in the chosen shell. --git selects an absolute git-next executable; its identity is checked. Without a bundled Bash runtime, standalone installation selects the platform's native shell. An explicitly unavailable profile fails clearly.
 
-Settings live in %APPDATA%\git-terminal\settings.json on Windows. Language follows the system locale until manually selected. The title bar switches Chinese/English. Font zoom and preferences persist atomically. The application never writes terminal output, commands, credentials or environment contents into application logs. Shells manage their normal history files.
+Settings live in %APPDATA%\git-terminal\settings.json on Windows. Language follows the system locale until manually selected. Open the dropdown beside + to choose a default shell or switch Chinese/English. Font zoom and preferences persist atomically. The application never writes terminal output, commands, credentials or environment contents into application logs. Shells manage their normal history files.
 
 | Action | Shortcut |
 | --- | --- |
-| New tab / close tab | Ctrl+Shift+T / Ctrl+Shift+W |
+| New tab / close tab | Ctrl+T / Ctrl+W (Ctrl+Shift+T/W also supported) |
 | Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab |
 | Copy selection / paste | Ctrl+Shift+C / Ctrl+Shift+V |
 | Paste | Shift+Insert or right click |
@@ -33,6 +33,8 @@ Settings live in %APPDATA%\git-terminal\settings.json on Windows. Language follo
 | Font zoom / reset | Ctrl +/- / Ctrl+0 |
 
 Requires Windows 10 1809+ with ConPTY and a Direct3D-capable graphics driver. Windows x64 and ARM64 binaries belong to the matching git-next MSI.
+
+The tab-first interface uses a dark native title bar, a readable 16px monospace terminal and a coordinated ANSI palette. Tabs show the directory and branch, with horizontal scrolling when many are open. New tabs inherit the active directory. Closing another tab preserves the selected session. The footer shows the active directory and shell; additional shell/language choices stay in the dropdown.
 
 ~~~powershell
 cargo build --locked --release --target x86_64-pc-windows-msvc

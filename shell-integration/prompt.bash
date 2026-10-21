@@ -19,8 +19,7 @@ __git_terminal_update_prompt() {
       branch=$("$GIT_NEXT_EXECUTABLE" -C "$PWD" rev-parse --short HEAD 2>/dev/null) || branch=
   fi
   __git_terminal_branch=${branch:+[$branch]}
-  label=${PWD##*/}
-  [[ $label ]] || label=/
+  label=$PWD
   label+="${branch:+ [$branch]}"
   label=${label//[[:cntrl:]]/?}
   printf '\033]0;%s\007' "$label"
