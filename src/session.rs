@@ -176,6 +176,11 @@ impl Setup {
         #[cfg(not(windows))]
         let shell = self.shell.clone();
         let mut cmd = CommandBuilder::new(shell);
+        // Preserve explicit session environment instead of portable-pty's registry refresh.
+        cmd.env_clear();
+        for (key, value) in std::env::vars_os() {
+            cmd.env(key, value);
+        }
         #[cfg(windows)]
         let cwd = if self.profile == "cmd" {
             windows_shell_path(&self.cwd)
