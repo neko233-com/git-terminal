@@ -287,6 +287,14 @@ def main():
             finally:
                 if p.poll() is None:subprocess.run([os.path.join(os.environ['SystemRoot'],'System32/taskkill.exe'),'/PID',str(p.pid),'/T','/F'],capture_output=True,timeout=10)
         record('explicit-command-exit-status-propagation',exit_status)
+        def burst_exit():
+            p=subprocess.Popen([str(binary),'--shell','powershell','--no-profile','--git',str(git),'--cwd',str(repo),'--command',"[Console]::Write(('x' * 1048576)); exit 9"],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+            try:
+                status=p.wait(timeout=30);assert status==9,"large-output command exit="+str(status)
+            finally:
+                if p.poll() is None:subprocess.run([os.path.join(os.environ['SystemRoot'],'System32/taskkill.exe'),'/PID',str(p.pid),'/T','/F'],capture_output=True,timeout=10)
+        record('bounded-output-drain-and-command-exit-without-ui-deadlock',burst_exit)
+
     value=dict(status='pass' if all(item['status']=='pass' for item in results) else 'fail',platform='windows-x64',renderer='gpui-fast',binary_sha256=hashlib.file_digest(binary.open('rb'),'sha256').hexdigest(),seconds=round(time.monotonic()-start,3),personal_profile_accessed=False,terminal_contents_logged=False,results=results)
     output.write_text(json.dumps(value,indent=2)+'\n',encoding='utf-8');print(json.dumps(value))
     raise SystemExit(value['status']!='pass')

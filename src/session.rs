@@ -270,7 +270,8 @@ impl Session {
             *status.lock() = Some(result.map(|s| s.exit_code()).unwrap_or(1));
             notify_ready.notify_all();
             // Close ConPTY off the UI thread so its reader can drain and receive EOF.
-            drop(close_master.lock().take());
+            let owned_master = close_master.lock().take();
+            drop(owned_master);
         });
         Ok((
             Self {
