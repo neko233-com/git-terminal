@@ -7,7 +7,7 @@ $installer = New-Object -ComObject WindowsInstaller.Installer
 $database = $installer.OpenDatabase($msi, 0)
 function Get-MsiProperty([string]$Name) {
     $view = $database.OpenView('SELECT `Value` FROM `Property` WHERE `Property` = ''' + $Name + '''')
-    $view.Execute(); $row = $view.Fetch(); $value = if ($row) { $row.StringData(1) } else { '' }; $view.Close(); return $value
+    [void]$view.Execute(); $row = $view.Fetch(); $value = if ($row) { $row.StringData(1) } else { '' }; [void]$view.Close(); return $value
 }
 if ((Get-MsiProperty 'Manufacturer') -cne 'neko233-com' -or (Get-MsiProperty 'ProductName') -cne 'git-next') { throw 'Select a complete git-next bundle MSI.' }
 $product = Get-MsiProperty 'ProductCode'
