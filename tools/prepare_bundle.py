@@ -63,8 +63,11 @@ def main():
             parser.error('Accepted shell integration changed')
     report = copy.deepcopy(original)
     records = report['files']
-    replaced = {name for name in records if name.startswith(('LICENSES/git-terminal/', 'bin/shell-integration/'))
-                or name in ('bin/git-terminal.exe', 'bin/git-terminal-shell.exe', 'bin/git-terminal-askpass.exe', 'bin/libunwind.dll')}
+    def mapped(name):
+        executable = name in ('git-terminal.exe', 'git-terminal-shell.exe', 'git-terminal-askpass.exe', 'libunwind.dll')
+        return ('bin/' if executable or name.startswith('shell-integration/') else 'LICENSES/git-terminal/') + name
+    # A small MSI update must retain every old component, including old notices.
+    replaced = set(records) & {mapped(name) for name in [*identity['files'], 'git-terminal-package.json']}
     output.mkdir(parents=True)
     for name in records.keys() - replaced:
         target = safe(output, name)
@@ -90,7 +93,7 @@ def main():
     report['terminal_update_acceptance'] = dict(base_manifest_sha256=sha(source),
         consolidated_sha256=sha(args.acceptance), terminal_package_sha256=sha(terminal / 'git-terminal-package.json'),
         core_and_other_payload_unchanged=True, native_runtime_platform='windows-x64', arm64_runtime_executed=False,
-        installer_operation='Windows Installer small update; REINSTALL=ALL REINSTALLMODE=vomus',
+        installer_operation='Windows Installer small update; original source basename, REINSTALL=ALL REINSTALLMODE=vamus',
         core_version=original['version'], terminal_version=identity['version'])
     for name, record in records.items():
         if sha(output / name) != record['sha256']: raise ValueError('Staged payload changed')
