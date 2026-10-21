@@ -10,6 +10,8 @@ pub struct Settings {
     pub font_family: String,
     pub scrollback: usize,
     pub shell: String,
+    pub syntax_highlighting: bool,
+    pub git_prompt: bool,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -24,6 +26,8 @@ impl Default for Settings {
             .into(),
             scrollback: 20000,
             shell: "auto".into(),
+            syntax_highlighting: true,
+            git_prompt: true,
         }
     }
 }

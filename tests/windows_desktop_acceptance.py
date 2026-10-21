@@ -39,6 +39,10 @@ k.GlobalUnlock.argtypes = [w.HGLOBAL]
 ole.OleGetClipboard.argtypes = [c.POINTER(c.c_void_p)]
 ole.OleSetClipboard.argtypes = [c.c_void_p]
 u.GetClipboardOwner.restype = w.HWND
+u.AttachThreadInput.argtypes = [w.DWORD,w.DWORD,w.BOOL]
+u.SetFocus.argtypes = [w.HWND]
+u.SetFocus.restype = w.HWND
+k.GetCurrentThreadId.restype = w.DWORD
 WINDOW_OWNERS = {}
 
 
@@ -89,6 +93,21 @@ def focused(hwnd):
     actual=w.DWORD();u.GetWindowThreadProcessId(hwnd,c.byref(actual))
     assert actual.value==WINDOW_OWNERS.get(hwnd), 'Window ownership changed; input refused'
     assert u.GetForegroundWindow()==hwnd, 'Focus changed; no input sent to another application'
+
+
+def activate_owned(hwnd):
+    actual=w.DWORD();target_thread=u.GetWindowThreadProcessId(hwnd,c.byref(actual))
+    assert actual.value==WINDOW_OWNERS.get(hwnd), 'Window ownership changed; activation refused'
+    current=k.GetCurrentThreadId();foreground=u.GetForegroundWindow()
+    foreground_thread=u.GetWindowThreadProcessId(foreground,None) if foreground else 0
+    attached=[]
+    try:
+        for thread in set((target_thread,foreground_thread))-{0,current}:
+            if u.AttachThreadInput(current,thread,True):attached.append(thread)
+        u.SetForegroundWindow(hwnd);u.SetFocus(hwnd)
+    finally:
+        for thread in reversed(attached):u.AttachThreadInput(current,thread,False)
+    wait_for(lambda:u.GetForegroundWindow()==hwnd,2)
 
 
 def send(hwnd, events):
@@ -155,7 +174,7 @@ def main():
     parser.add_argument('--output',type=Path,required=True)
     args=parser.parse_args();binary=args.binary.resolve(strict=True);git=args.git.resolve(strict=True)
     output=args.output.resolve();output.parent.mkdir(parents=True,exist_ok=True)
-    results=[];process=None;original_clipboard=c.c_void_p();clipboard_saved=False
+    results=[];process=None;original_clipboard=c.c_void_p();clipboard_saved=False;fixture_clipboard=''
     ole.OleInitialize(None)
     start=time.monotonic()
     with tempfile.TemporaryDirectory(prefix='git-terminal-desktop-') as temporary:
@@ -168,7 +187,7 @@ def main():
                 if process and process.poll() is None:
                     owned=window_for(process.pid)
                     if owned:
-                        u.SetForegroundWindow(owned);wait_for(lambda:u.GetForegroundWindow()==owned,2)
+                        activate_owned(owned)
                 action();results.append(dict(case=name,status='pass',seconds=round(time.monotonic()-then,3)))
             except (AssertionError,OSError,ValueError,subprocess.SubprocessError) as error:
                 results.append(dict(case=name,status='fail',error_type=type(error).__name__,reason=str(error)[:180],seconds=round(time.monotonic()-then,3)))
@@ -181,7 +200,7 @@ def main():
         record('identity-profiles-unicode-cwd-language-atomic-settings',cli)
         try:
             process=subprocess.Popen([str(binary),'--shell','cmd','--no-profile','--git',str(git),'--cwd',str(repo)],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-            hwnd=wait_for(lambda:window_for(process.pid));u.SetWindowPos(hwnd,None,40,40,1120,720,4);u.SetForegroundWindow(hwnd);wait_for(lambda:u.GetForegroundWindow()==hwnd)
+            hwnd=wait_for(lambda:window_for(process.pid));u.SetWindowPos(hwnd,None,40,40,1120,720,4);activate_owned(hwnd)
             time.sleep(1)
             def powershell(source):
                 executable=os.path.join(os.environ['SystemRoot'],'System32/WindowsPowerShell/v1.0/powershell.exe')
@@ -191,10 +210,10 @@ def main():
                 wait_for(path.exists);assert path.read_text(encoding='utf-8')=='中文🙂'
             record('real-window-native-unicode-text-input-and-pty',typed)
             def paste():
-                nonlocal clipboard_saved
+                nonlocal clipboard_saved,fixture_clipboard
                 focused(hwnd)
                 assert ole.OleGetClipboard(c.byref(original_clipboard))>=0;clipboard_saved=True
-                path=root/'clipboard.txt';set_clipboard(hwnd,powershell("[IO.File]::WriteAllText('"+path.as_posix()+"','clipboard-中文')"))
+                path=root/'clipboard.txt';fixture_clipboard=powershell("[IO.File]::WriteAllText('"+path.as_posix()+"','clipboard-中文')");set_clipboard(hwnd,fixture_clipboard)
                 shortcut(hwnd,0x11,0x10,0x56);shortcut(hwnd,0x0D);wait_for(path.exists);assert path.read_text(encoding='utf-8')=='clipboard-中文'
             record('native-clipboard-paste-with-original-preserved-in-memory',paste)
             def tabs():
@@ -255,10 +274,13 @@ def main():
             if clipboard_saved:
                 owner=u.GetClipboardOwner();owner_pid=w.DWORD()
                 if owner:u.GetWindowThreadProcessId(owner,c.byref(owner_pid))
-                if owner_pid.value in (os.getpid(),process.pid if process else 0):
+                owned_text=clipboard_text()
+                if owner_pid.value in (os.getpid(),process.pid if process else 0) or owned_text==fixture_clipboard or owned_text.strip()=='COPY_MARKER_GIT_TERMINAL':
                     restored=ole.OleSetClipboard(original_clipboard)
                     if restored>=0:restored=ole.OleFlushClipboard()
                     results.append(dict(case='original-clipboard-restored',status='pass' if restored>=0 else 'fail'))
+                else:
+                    results.append(dict(case='new-external-clipboard-change-preserved',status='pass'))
                 if original_clipboard:
                     table=c.cast(original_clipboard,c.POINTER(c.POINTER(c.c_void_p))).contents
                     c.WINFUNCTYPE(w.ULONG,c.c_void_p)(table[2])(original_clipboard)

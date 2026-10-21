@@ -2,6 +2,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod session;
 mod settings;
+#[cfg(all(test, windows))]
+mod shell_acceptance;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -30,6 +32,8 @@ struct Options {
     no_cd: bool,
     #[arg(long)]
     no_profile: bool,
+    #[arg(long)]
+    no_shell_integration: bool,
     #[arg(long,default_value="auto",value_parser=["auto","bash","powershell","cmd","shell"])]
     shell: String,
     #[arg(long)]
@@ -437,6 +441,13 @@ fn run() -> Result<u32> {
     };
     let mut setup = Setup::discover(&cwd, profile, options.git.as_deref())?;
     setup.no_profile = options.no_profile;
+    if options.no_shell_integration {
+        setup.integration = None;
+    }
+    let supported =
+        setup.integration.is_some() && matches!(setup.profile.as_str(), "bash" | "powershell");
+    setup.syntax_highlighting = settings.syntax_highlighting && supported;
+    setup.git_prompt = settings.git_prompt && supported;
     if options.print_setup {
         println!("{}", serde_json::to_string_pretty(&setup)?);
         return Ok(0);

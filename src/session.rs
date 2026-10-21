@@ -18,6 +18,9 @@ pub struct Setup {
     pub profile: String,
     pub git: Option<PathBuf>,
     pub no_profile: bool,
+    pub integration: Option<PathBuf>,
+    pub syntax_highlighting: bool,
+    pub git_prompt: bool,
 }
 
 fn find_command(name: &str) -> Option<PathBuf> {
@@ -51,6 +54,15 @@ impl Setup {
             bail!("Working directory must be a directory");
         }
         let executable = std::env::current_exe()?;
+        let integration = executable
+            .parent()
+            .map(|p| p.join("shell-integration"))
+            .filter(|p| p.join("bashrc").is_file());
+        #[cfg(any(debug_assertions, test))]
+        let integration = integration.or_else(|| {
+            let p = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("shell-integration");
+            p.join("bashrc").is_file().then_some(p)
+        });
         let sibling = executable
             .parent()
             .unwrap_or(Path::new("."))
@@ -146,6 +158,9 @@ impl Setup {
             profile: profile.into(),
             git,
             no_profile: false,
+            integration,
+            syntax_highlighting: true,
+            git_prompt: true,
         })
     }
 
@@ -174,6 +189,18 @@ impl Setup {
         cmd.env("COLORTERM", "truecolor");
         cmd.env("TERM_PROGRAM", "Git-Terminal");
         cmd.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
+        cmd.env(
+            "GIT_TERMINAL_LOAD_PROFILE",
+            if self.no_profile { "0" } else { "1" },
+        );
+        cmd.env(
+            "GIT_TERMINAL_SYNTAX_HIGHLIGHTING",
+            if self.syntax_highlighting { "1" } else { "0" },
+        );
+        cmd.env(
+            "GIT_TERMINAL_GIT_PROMPT",
+            if self.git_prompt { "1" } else { "0" },
+        );
         if let Some(git) = &self.git {
             let bin = git.parent().unwrap();
             let root = bin.parent().unwrap();
@@ -203,14 +230,34 @@ impl Setup {
             paths.extend(std::env::split_paths(
                 &std::env::var_os("PATH").unwrap_or_default(),
             ));
+            #[cfg(windows)]
+            let paths: Vec<PathBuf> = paths.iter().map(|p| windows_shell_path(p)).collect();
             if let Ok(path) = std::env::join_paths(paths) {
                 cmd.env("PATH", path);
             }
-            cmd.env("GIT_NEXT_EXECUTABLE", git);
+            #[cfg(windows)]
+            let git = windows_shell_path(git);
+            if self.profile == "bash" {
+                cmd.env(
+                    "GIT_NEXT_EXECUTABLE",
+                    git.to_string_lossy().replace('\\', "/"),
+                );
+            } else {
+                cmd.env("GIT_NEXT_EXECUTABLE", git);
+            }
         }
         match self.profile.as_str() {
             "bash" => {
-                if self.no_profile {
+                if command.is_none()
+                    && let Some(integration) = &self.integration
+                {
+                    cmd.args(["--noprofile", "--rcfile"]);
+                    #[cfg(windows)]
+                    let rcfile = windows_shell_path(&integration.join("bashrc"));
+                    #[cfg(not(windows))]
+                    let rcfile = integration.join("bashrc");
+                    cmd.arg(rcfile.to_string_lossy().replace('\\', "/"));
+                } else if self.no_profile {
                     cmd.args(["--noprofile", "--norc"]);
                 } else {
                     cmd.arg("--login");
@@ -230,6 +277,9 @@ impl Setup {
                 if let Some(command) = command {
                     cmd.arg("-Command");
                     cmd.arg(command);
+                } else if let Some(integration) = &self.integration {
+                    cmd.args(["-ExecutionPolicy", "Bypass", "-NoExit", "-File"]);
+                    cmd.arg(integration.join("powershell.ps1"));
                 }
             }
             "cmd" => {

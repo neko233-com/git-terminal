@@ -1,0 +1,23 @@
+# Copyright 2026 git-next contributors. MIT license.
+# This file is an owned Bash rc file; user profiles stay in their normal locations.
+__git_terminal_integration_dir=${BASH_SOURCE[0]%/*}
+if [[ ${GIT_TERMINAL_LOAD_PROFILE:-1} == 1 ]]; then
+  [[ ! -r /etc/profile ]] || builtin source /etc/profile
+  for __git_terminal_profile in "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.profile"; do
+    if [[ -r $__git_terminal_profile ]]; then
+      builtin source "$__git_terminal_profile"
+      break
+    fi
+  done
+  unset __git_terminal_profile
+fi
+if [[ ${GIT_TERMINAL_SYNTAX_HIGHLIGHTING:-1} == 1 && -r $__git_terminal_integration_dir/blesh/ble.sh ]]; then
+  builtin source "$__git_terminal_integration_dir/blesh/ble.sh" --noattach
+fi
+if [[ ${GIT_TERMINAL_GIT_PROMPT:-1} == 1 ]]; then
+  builtin source "$__git_terminal_integration_dir/prompt.bash"
+fi
+if declare -F ble-attach >/dev/null; then
+  ble-attach
+fi
+unset __git_terminal_integration_dir
