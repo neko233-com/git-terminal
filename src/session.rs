@@ -189,6 +189,17 @@ impl Setup {
         cmd.env("COLORTERM", "truecolor");
         cmd.env("TERM_PROGRAM", "Git-Terminal");
         cmd.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
+        if std::env::var_os("USER").is_none()
+            && let Some(user) = std::env::var_os("USERNAME")
+        {
+            cmd.env("USER", user);
+        }
+        if self.profile == "bash" {
+            cmd.env("TMPDIR", std::env::temp_dir());
+            if std::env::var_os("LANG").is_none() {
+                cmd.env("LANG", "C.UTF-8");
+            }
+        }
         cmd.env(
             "GIT_TERMINAL_LOAD_PROFILE",
             if self.no_profile { "0" } else { "1" },

@@ -64,7 +64,14 @@ fn shell_features_real_pty() {
             .unwrap();
         assert!(
             output.status.success(),
-            "generated Git fixture operation failed"
+            "generated Git fixture operation failed: {} exit={:?} error={}",
+            args[0],
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr)
+                .replace(&root.to_string_lossy().to_string(), "<fixture>")
+                .chars()
+                .take(500)
+                .collect::<String>()
         );
         output.stdout
     };

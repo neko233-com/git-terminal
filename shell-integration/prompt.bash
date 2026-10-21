@@ -27,6 +27,7 @@ __git_terminal_update_prompt() {
 }
 
 # Variable values are expanded by Bash without re-evaluating branch text as code.
+PROMPT_DIRTRIM=${PROMPT_DIRTRIM:-3}
 PS1='\[\e[36m\]\w\[\e[0m\] \[\e[35m\]${__git_terminal_branch}\[\e[0m\]\n\[\e[32m\]❯\[\e[0m\] '
 if [[ $(declare -p PROMPT_COMMAND 2>/dev/null) == 'declare -a '* ]]; then
   PROMPT_COMMAND+=(__git_terminal_update_prompt)

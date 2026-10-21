@@ -113,6 +113,7 @@ def activate_owned(hwnd):
 
 
 def send(hwnd, events):
+    if u.GetForegroundWindow()!=hwnd:activate_owned(hwnd)
     focused(hwnd)
     values=(Input*len(events))(*events)
     assert u.SendInput(len(values),values,c.sizeof(Input))==len(values), 'Owned window input was refused'
@@ -123,7 +124,9 @@ def key(vk, up=False):
 
 
 def shortcut(hwnd,*keys):
-    send(hwnd,[*(key(v) for v in keys),*(key(v,True) for v in reversed(keys))])
+    send(hwnd,[key(v) for v in keys])
+    time.sleep(.035)
+    send(hwnd,[key(v,True) for v in reversed(keys)])
 
 
 def type_text(hwnd,text):
@@ -147,6 +150,12 @@ def bounds(hwnd):
     assert u.GetClientRect(hwnd,c.byref(rect)) and u.ClientToScreen(hwnd,c.byref(point))
     assert rect.right>=500 and rect.bottom>=250, 'Owned terminal window is not available for capture'
     return point.x,point.y,point.x+rect.right,point.y+rect.bottom
+
+
+def screenshot(hwnd,path):
+    activate_owned(hwnd)
+    focused(hwnd)
+    ImageGrab.grab(bbox=bounds(hwnd)).save(path)
 
 
 def clipboard_text():
@@ -183,7 +192,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='git-terminal-desktop-') as temporary:
         root=Path(temporary);home=root/'home';repo=root/'中文 repo';home.mkdir();repo.mkdir()
         env={key:value for key,value in os.environ.items() if not key.startswith(('GIT_','GCM_','SSH_','GNUPG'))}
-        env.update(HOME=str(home),USERPROFILE=str(home),APPDATA=str(home/'appdata'),LOCALAPPDATA=str(home/'local'),XDG_CONFIG_HOME=str(home/'.config'),GIT_CONFIG_GLOBAL=str(home/'.gitconfig'),GIT_NEXT_CONFIG_HOME=str(home/'git-next'),SSH_ROOT_PATH=str(home/'.ssh'),GIT_TERMINAL_PROMPT='0',GCM_INTERACTIVE='never')
+        env.update(HOME=str(home),USERPROFILE=str(home),APPDATA=str(home/'appdata'),LOCALAPPDATA=str(home/'local'),XDG_CONFIG_HOME=str(home/'.config'),GIT_CONFIG_GLOBAL=str(home/'.gitconfig'),GIT_NEXT_CONFIG_HOME=str(home/'git-next'),SSH_ROOT_PATH=str(home/'.ssh'),GIT_TERMINAL_PROMPT='0',GCM_INTERACTIVE='never',LANG='C.UTF-8',LC_ALL='C.UTF-8')
         def record(name,action):
             then=time.monotonic()
             try:
@@ -194,6 +203,14 @@ def main():
                 action();results.append(dict(case=name,status='pass',seconds=round(time.monotonic()-then,3)))
             except (AssertionError,OSError,ValueError,IndexError,subprocess.SubprocessError) as error:
                 results.append(dict(case=name,status='fail',error_type=type(error).__name__,reason=str(error)[:180],seconds=round(time.monotonic()-then,3)))
+                if process and process.poll() is None:
+                    try:
+                        owned=window_for(process.pid)
+                        if owned:
+                            activate_owned(owned)
+                            screenshot(owned,output.with_name(output.stem+'-'+name+'.png'))
+                    except (AssertionError,OSError,ValueError,IndexError):pass
+            print(json.dumps(results[-1]),flush=True)
         def cli():
             value=subprocess.run([str(binary),'--print-setup','--json','--no-profile','--git',str(git),'--cwd',str(repo)],env=env,capture_output=True,timeout=15)
             assert value.returncode==0
@@ -206,6 +223,8 @@ def main():
             process=subprocess.Popen([str(binary),'--no-profile','--git',str(git),'--cwd',str(repo)],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
             hwnd=wait_for(lambda:window_for(process.pid));u.SetWindowPos(hwnd,None,40,40,1120,720,4);activate_owned(hwnd)
             time.sleep(2)
+            shortcut(hwnd,0x1B);shortcut(hwnd,0x11,0x55)
+            screenshot(hwnd,output.with_name(output.stem+'-startup.png'))
             def quote(path):
                 return "'"+str(path).replace('\\','/').replace("'","'\\''")+"'"
             def powershell(source):
@@ -235,10 +254,10 @@ def main():
             record('native-keyboard-tabs-independent-shells-and-close',tabs)
             def resize():
                 before=root/'width-before.txt';after=root/'width-after.txt'
-                command(hwnd,"printf '%s' \"$COLUMNS\" > "+quote(before));wait_for(before.exists)
+                command(hwnd,"stty size > "+quote(before));wait_for(before.exists)
                 u.SetWindowPos(hwnd,None,40,40,920,650,4);time.sleep(.5)
-                command(hwnd,"printf '%s' \"$COLUMNS\" > "+quote(after));wait_for(after.exists)
-                assert int(before.read_text())!=int(after.read_text())
+                command(hwnd,"stty size > "+quote(after));wait_for(after.exists)
+                assert int(before.read_text().split()[1])!=int(after.read_text().split()[1])
             record('native-window-resize-reaches-conpty',resize)
             def rendering():
                 ready=root/'render.txt';command(hwnd,"printf '\\033[2J\\033[HGit-Terminal 中文 / UTF-8\\nCOPY_MARKER_GIT_TERMINAL\\n'; printf ready > "+quote(ready))
@@ -277,6 +296,17 @@ def main():
                 send(hwnd,[Input(0,Payload(mouse=Mouse(0,0,120*3,0x0800,0,0)))]);time.sleep(.25)
                 wheel=hashlib.sha256(ImageGrab.grab(bbox=bounds(hwnd)).crop(region).tobytes()).hexdigest();assert wheel!=before
             record('native-shift-page-and-mouse-wheel-scrollback',history)
+            def tab_design():
+                shortcut(hwnd,0x11,0x54);time.sleep(1.5)
+                command(hwnd,"clear; \"$GIT_NEXT_EXECUTABLE\" --version")
+                time.sleep(.5)
+                type_text(hwnd,'git log --oneline --all "中文路径"')
+                time.sleep(.5)
+                image=ImageGrab.grab(bbox=bounds(hwnd))
+                image.save(output.with_name(output.stem+'-tabs-highlight.png'))
+                shortcut(hwnd,0x11,0x55)
+                shortcut(hwnd,0x11,0x57)
+            record('tab-first-design-default-bash-live-command-highlighting',tab_design)
         finally:
             try:
                 if clipboard_saved:

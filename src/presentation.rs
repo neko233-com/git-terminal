@@ -19,6 +19,7 @@ pub struct TabContext {
 
 impl TabContext {
     pub fn new(cwd: PathBuf, profile: String) -> Self {
+        let cwd = display_directory(cwd);
         let label = cwd
             .file_name()
             .unwrap_or(cwd.as_os_str())
@@ -65,6 +66,7 @@ impl TabContext {
 fn shell_directory(directory: &str) -> PathBuf {
     #[cfg(windows)]
     {
+        let directory = directory.strip_prefix("/cygdrive").unwrap_or(directory);
         let bytes = directory.as_bytes();
         if bytes.len() >= 3
             && bytes[0] == b'/'
@@ -75,6 +77,20 @@ fn shell_directory(directory: &str) -> PathBuf {
         }
     }
     PathBuf::from(directory)
+}
+
+fn display_directory(path: PathBuf) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let text = path.to_string_lossy();
+        if let Some(unc) = text.strip_prefix(r"\\?\UNC\") {
+            return PathBuf::from(format!(r"\\{unc}"));
+        }
+        if let Some(local) = text.strip_prefix(r"\\?\") {
+            return PathBuf::from(local);
+        }
+    }
+    path
 }
 
 #[cfg(windows)]
