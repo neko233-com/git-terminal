@@ -149,13 +149,35 @@ fn shell_features_real_pty() {
             if received
                 .windows(needle.len())
                 .any(|b| b == needle.as_bytes())
+                || terminal.with_term(|term| {
+                    let screen: String = (0..term.screen_lines())
+                        .flat_map(|line| {
+                            (0..term.columns())
+                                .map(move |col| {
+                                    term.grid()[Point::new(
+                                        alacritty_terminal::index::Line(line as i32),
+                                        Column(col),
+                                    )]
+                                    .c
+                                })
+                                .chain(std::iter::once('\n'))
+                        })
+                        .collect();
+                    screen.contains(needle)
+                })
             {
                 return;
             }
         }
-        panic!("generated interactive shell fixture did not become ready: {needle}");
+        panic!(
+            "generated interactive shell fixture did not become ready: {needle}; received_bytes={}; bracketed_paste={}",
+            received.len(),
+            terminal
+                .mode()
+                .contains(alacritty_terminal::term::TermMode::BRACKETED_PASTE)
+        );
     };
-    pump(&mut terminal, &mut writer, &mut received, "❯");
+    pump(&mut terminal, &mut writer, &mut received, "\x1b[?2004h");
     writer.write_all(b"builtin printf '\\107\\124_READY:%s:%s\\n' \"$BLE_VERSION\" \"$__git_terminal_branch\"\r").unwrap();
     writer.flush().unwrap();
     received.clear();
