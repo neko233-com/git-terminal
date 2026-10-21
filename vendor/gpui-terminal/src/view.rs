@@ -759,7 +759,8 @@ impl TerminalView {
             self.send_input(text.replace("\r\n", "\n").replace('\n', "\r").as_bytes());
         }
     }
-    fn paste_clipboard(&mut self, cx: &mut Context<Self>) {
+    /// Paste from a host shortcut, retrying transient clipboard contention asynchronously.
+    pub fn paste_clipboard(&mut self, cx: &mut Context<Self>) {
         if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
             self.paste_text(&text);
             return;

@@ -209,6 +209,8 @@ def main():
     parser.add_argument('--binary',type=Path,required=True)
     parser.add_argument('--git',type=Path,required=True)
     parser.add_argument('--output',type=Path,required=True)
+    parser.add_argument('--only-case')
+    parser.add_argument('--paste-key',choices=('ctrl-shift-v','shift-insert'),default='ctrl-shift-v')
     args=parser.parse_args();binary=args.binary.resolve(strict=True);git=args.git.resolve(strict=True)
     output=args.output.resolve();output.parent.mkdir(parents=True,exist_ok=True)
     results=[];process=None;original_clipboard=c.c_void_p();clipboard_saved=False;fixture_clipboard=''
@@ -221,6 +223,7 @@ def main():
         env={key:value for key,value in os.environ.items() if not key.startswith(('GIT_','GCM_','SSH_','GNUPG'))}
         env.update(HOME=str(home),USERPROFILE=str(home),APPDATA=str(home/'appdata'),LOCALAPPDATA=str(home/'local'),XDG_CONFIG_HOME=str(home/'.config'),GIT_CONFIG_GLOBAL=str(home/'.gitconfig'),GIT_NEXT_CONFIG_HOME=str(home/'git-next'),SSH_ROOT_PATH=str(home/'.ssh'),GIT_TERMINAL_PROMPT='0',GCM_INTERACTIVE='never',LANG='C.UTF-8',LC_ALL='C.UTF-8')
         def record(name,action):
+            if args.only_case and name!=args.only_case and name!='identity-profiles-unicode-cwd-language-atomic-settings':return
             then=time.monotonic()
             try:
                 if process and process.poll() is None:
@@ -267,7 +270,7 @@ def main():
                 assert ole.OleGetClipboard(c.byref(original_clipboard))>=0;clipboard_saved=True
                 path=root/'clipboard.txt';fixture_clipboard="printf '%s' 'clipboard-中文' > "+quote(path);set_clipboard(clipboard_window,fixture_clipboard)
                 assert clipboard_text()==fixture_clipboard
-                shortcut(hwnd,0x11,0x10,0x56);time.sleep(.2);shortcut(hwnd,0x0D);wait_file(path,'clipboard-中文')
+                shortcut(hwnd,*( [0x11,0x10,0x56] if args.paste_key=='ctrl-shift-v' else [0x10,0x2D] ));time.sleep(.2);shortcut(hwnd,0x0D);wait_file(path,'clipboard-中文')
             record('native-clipboard-paste-with-original-preserved-in-memory',paste)
             def tabs():
                 first=root/'first.txt';second=root/'second.txt';returned=root/'returned.txt'
@@ -279,6 +282,10 @@ def main():
                 shortcut(hwnd,0x11,0x10,0x09);time.sleep(.15)
                 shortcut(hwnd,0x11,0x57);time.sleep(.3)
                 command(hwnd,"printf '%s' \"$GIT_TERMINAL_TAB\" > "+quote(returned));wait_file(returned,'first')
+                exited=root/'after-shell-exit.txt'
+                shortcut(hwnd,0x11,0x54);time.sleep(.5)
+                command(hwnd,'exit');time.sleep(.4)
+                command(hwnd,"printf '%s' \"$GIT_TERMINAL_TAB\" > "+quote(exited));wait_file(exited,'first')
             record('native-keyboard-tabs-independent-shells-and-close',tabs)
             def resize():
                 before=root/'width-before.txt';after=root/'width-after.txt'
@@ -394,7 +401,7 @@ def main():
         record('bounded-output-drain-and-command-exit-without-ui-deadlock',burst_exit)
 
     u.DestroyWindow(clipboard_window);ole.OleUninitialize()
-    value=dict(status='pass' if all(item['status']=='pass' for item in results) else 'fail',platform='windows-x64',renderer='gpui-fast',input_delivery='owned HWND WM_CHAR UTF-16 commits; SendInput keyboard shortcuts',binary_sha256=hashlib.file_digest(binary.open('rb'),'sha256').hexdigest(),seconds=round(time.monotonic()-start,3),personal_profile_accessed=False,terminal_contents_logged=False,results=results)
+    value=dict(status='pass' if all(item['status']=='pass' for item in results) else 'fail',scope='selected' if args.only_case else 'all',paste_key=args.paste_key,platform='windows-x64',renderer='gpui-fast',input_delivery='owned HWND WM_CHAR UTF-16 commits; SendInput keyboard shortcuts',binary_sha256=hashlib.file_digest(binary.open('rb'),'sha256').hexdigest(),seconds=round(time.monotonic()-start,3),personal_profile_accessed=False,terminal_contents_logged=False,results=results)
     output.write_text(json.dumps(value,indent=2)+'\n',encoding='utf-8');print(json.dumps(value))
     raise SystemExit(value['status']!='pass')
 

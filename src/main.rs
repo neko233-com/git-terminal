@@ -184,12 +184,8 @@ impl Desktop {
                     let parent = parent.clone();
                     let handle = window.window_handle();
                     cx.spawn(async move |_, cx| {
-                        let _ = parent.update(cx, |app, cx| {
-                            app.remove_tab(id);
-                            if app.tabs.is_empty() {
-                                let _ = handle.update(cx, |_, window, _| window.remove_window());
-                            }
-                            cx.notify();
+                        let _ = handle.update(cx, |_, window, cx| {
+                            let _ = parent.update(cx, |app, cx| app.close(id, window, cx));
                         });
                     })
                     .detach();
@@ -246,6 +242,11 @@ impl Desktop {
         } else if k.modifiers.control && k.key == "w" {
             if let Some(t) = self.tabs.get(self.active) {
                 self.close(t.id, window, cx);
+            }
+        } else if k.modifiers.control && k.modifiers.shift && k.key == "v" {
+            if let Some(tab) = self.tabs.get(self.active) {
+                tab.terminal
+                    .update(cx, |terminal, cx| terminal.paste_clipboard(cx));
             }
         } else if k.modifiers.control && k.key == "tab" && !self.tabs.is_empty() {
             let n = self.tabs.len();
