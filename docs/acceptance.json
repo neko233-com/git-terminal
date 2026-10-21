@@ -1,0 +1,109 @@
+{
+  "schema_version": 1,
+  "product": "git-terminal",
+  "version": "0.2.0",
+  "status": "pass",
+  "verification_seconds": 36.032,
+  "fixture_inclusive_seconds": 38.073,
+  "binary_sha256": "88d686928ae615efde00e2378c02bd21978b8c12df7476bc76559ac726625c26",
+  "shell_integration_sha256": {
+    "bashrc": "a4871b46a7787cfc297bb2cd1bcbf119616cc414b1ebf2053f6525591ff3a4a7",
+    "powershell.ps1": "e688111ac24e621182ee8195f7ee80a8097582f268e38fad078d28c42f6ace70",
+    "prompt.bash": "37e6d80e5fed5ce06b35069f552f8cfb190e5d6977774e26d38053379fa9b04f"
+  },
+  "rust_tests_passed": 76,
+  "groups": [
+    {
+      "case": "ssh-sftp-monitor-real-protocol",
+      "status": "pass"
+    },
+    {
+      "case": "rust-pty-protocol-lifecycle-cancel-and-unit-tests",
+      "status": "pass"
+    },
+    {
+      "case": "serialized-native-desktop",
+      "status": "pass"
+    },
+    {
+      "case": "common-git-cli-sha1-sha256",
+      "status": "pass"
+    }
+  ],
+  "profiles": [
+    {
+      "profile": "bash",
+      "status": "pass",
+      "startup_command_ms": 1409.4,
+      "help_then_next_command_ms": [
+        131.5,
+        131.4,
+        108.3,
+        93.3,
+        132.1
+      ],
+      "burst_2mb_completion_ms": 3194.3,
+      "burst_new_tab_command_ms": 500.9,
+      "burst_recovery_command_ms": 42.2
+    },
+    {
+      "profile": "powershell",
+      "status": "pass",
+      "startup_command_ms": 1305.5,
+      "help_then_next_command_ms": [
+        90.2,
+        91.6,
+        84.9,
+        87.5,
+        84.0
+      ],
+      "burst_2mb_completion_ms": null,
+      "burst_new_tab_command_ms": null,
+      "burst_recovery_command_ms": null
+    },
+    {
+      "profile": "cmd",
+      "status": "pass",
+      "startup_command_ms": 490.7,
+      "help_then_next_command_ms": [
+        93.2,
+        87.7,
+        81.1,
+        83.2,
+        84.7
+      ],
+      "burst_2mb_completion_ms": null,
+      "burst_new_tab_command_ms": null,
+      "burst_recovery_command_ms": null
+    }
+  ],
+  "workstation": {
+    "status": "pass",
+    "installer_exit_code": 0,
+    "terminal_version": "0.2.0",
+    "terminal_sha256": "88d686928ae615efde00e2378c02bd21978b8c12df7476bc76559ac726625c26",
+    "core_sha256": "3bc2edf09efc3c2a67758725a8e7dc009f25b62ab6f9daf5512774be69a8c8be",
+    "default_git_version": "git version 2.54.0.windows.1.git-next.0.3.0",
+    "installed_files_verified": 10602,
+    "configuration_files_unchanged": 12,
+    "repair_payload_recached": true,
+    "source_name_preserved": true
+  },
+  "msi_repair": {
+    "status": "pass",
+    "old_components": 11837,
+    "new_components": 11842,
+    "removed_components": 0,
+    "cached_new_authentication_helper": true,
+    "cached_full_package": true
+  },
+  "windows_x64_native_runtime": true,
+  "windows_arm64_cross_built": true,
+  "windows_arm64_runtime_executed": false,
+  "mac_desktop_runtime_executed": false,
+  "monitor_adapter": "Linux",
+  "git_product_auto_update_preserved": true,
+  "standalone_terminal_auto_update": false,
+  "personal_credentials_used_for_authentication": false,
+  "fixture_profiles_isolated": true
+}
