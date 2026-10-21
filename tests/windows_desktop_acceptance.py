@@ -49,6 +49,8 @@ u.CreateWindowExW.restype = w.HWND
 u.DestroyWindow.argtypes = [w.HWND]
 u.SendMessageW.argtypes = [w.HWND,w.UINT,w.WPARAM,w.LPARAM]
 u.SendMessageW.restype = w.LPARAM
+u.RegisterHotKey.argtypes = [w.HWND,c.c_int,w.UINT,w.UINT]
+u.UnregisterHotKey.argtypes = [w.HWND,c.c_int]
 k.GetCurrentThreadId.restype = w.DWORD
 WINDOW_OWNERS = {}
 
@@ -210,13 +212,20 @@ def main():
     parser.add_argument('--git',type=Path,required=True)
     parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--only-case')
-    parser.add_argument('--paste-key',choices=('ctrl-shift-v','shift-insert'),default='ctrl-shift-v')
+    parser.add_argument('--paste-key',choices=('auto','ctrl-shift-v','shift-insert'),default='auto')
     args=parser.parse_args();binary=args.binary.resolve(strict=True);git=args.git.resolve(strict=True)
     output=args.output.resolve();output.parent.mkdir(parents=True,exist_ok=True)
     results=[];process=None;original_clipboard=c.c_void_p();clipboard_saved=False;fixture_clipboard=''
     ole.OleInitialize(None)
     clipboard_window=u.CreateWindowExW(0,'STATIC','',0,0,0,0,0,w.HWND(-3),None,None,None)
     assert clipboard_window, 'Owned clipboard fixture window could not be created'
+    hotkey_conflict=False
+    if args.paste_key=='auto':
+        registered=u.RegisterHotKey(clipboard_window,0x2330,0x4006,0x56)
+        if registered:u.UnregisterHotKey(clipboard_window,0x2330)
+        else:
+            hotkey_conflict=c.get_last_error()==1409
+        args.paste_key='shift-insert' if hotkey_conflict else 'ctrl-shift-v'
     start=time.monotonic()
     with tempfile.TemporaryDirectory(prefix='git-terminal-desktop-') as temporary:
         root=Path(temporary);home=root/'home';repo=root/'中文 repo';home.mkdir();repo.mkdir()
@@ -401,7 +410,7 @@ def main():
         record('bounded-output-drain-and-command-exit-without-ui-deadlock',burst_exit)
 
     u.DestroyWindow(clipboard_window);ole.OleUninitialize()
-    value=dict(status='pass' if all(item['status']=='pass' for item in results) else 'fail',scope='selected' if args.only_case else 'all',paste_key=args.paste_key,platform='windows-x64',renderer='gpui-fast',input_delivery='owned HWND WM_CHAR UTF-16 commits; SendInput keyboard shortcuts',binary_sha256=hashlib.file_digest(binary.open('rb'),'sha256').hexdigest(),seconds=round(time.monotonic()-start,3),personal_profile_accessed=False,terminal_contents_logged=False,results=results)
+    value=dict(status='pass' if all(item['status']=='pass' for item in results) else 'fail',scope='selected' if args.only_case else 'all',paste_key=args.paste_key,ctrl_shift_v_registered_elsewhere=hotkey_conflict,platform='windows-x64',renderer='gpui-fast',input_delivery='owned HWND WM_CHAR UTF-16 commits; SendInput keyboard shortcuts',binary_sha256=hashlib.file_digest(binary.open('rb'),'sha256').hexdigest(),seconds=round(time.monotonic()-start,3),personal_profile_accessed=False,terminal_contents_logged=False,results=results)
     output.write_text(json.dumps(value,indent=2)+'\n',encoding='utf-8');print(json.dumps(value))
     raise SystemExit(value['status']!='pass')
 
