@@ -7,6 +7,17 @@ fn main() {
         return;
     }
     let root = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap());
+    let version = env::var("CARGO_PKG_VERSION").unwrap();
+    let parts: Vec<u16> = version
+        .split('.')
+        .map(|part| part.parse().expect("stable numeric package version"))
+        .collect();
+    assert_eq!(
+        parts.len(),
+        3,
+        "Windows requires a three-part package version"
+    );
+    let numeric = format!("{},{},{},0", parts[0], parts[1], parts[2]);
     let out = PathBuf::from(env::var_os("OUT_DIR").unwrap());
     let icon = root
         .join("assets/git-terminal.ico")
@@ -18,8 +29,8 @@ fn main() {
         format!(
             r#"1 ICON "{icon}"
 1 VERSIONINFO
-FILEVERSION 0,1,0,0
-PRODUCTVERSION 0,1,0,0
+FILEVERSION {numeric}
+PRODUCTVERSION {numeric}
 FILEOS 0x40004L
 FILETYPE 1
 BEGIN
@@ -30,8 +41,8 @@ BEGIN
    VALUE "CompanyName", "neko233-com\0"
    VALUE "FileDescription", "Git-Terminal\0"
    VALUE "ProductName", "Git-Terminal\0"
-   VALUE "FileVersion", "0.1.0\0"
-   VALUE "ProductVersion", "0.1.0\0"
+   VALUE "FileVersion", "{version}\0"
+   VALUE "ProductVersion", "{version}\0"
   END
  END
  BLOCK "VarFileInfo"
