@@ -1,6 +1,6 @@
 [package]
 name = "git-terminal"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.96"
 license = "MIT"
@@ -8,6 +8,7 @@ description = "Native GPUI Fast terminal for git-next"
 repository = "https://github.com/neko233-com/git-terminal"
 [dependencies]
 anyhow = "1"
+flume = "0.12"
 clap = { version = "4.6", features = ["derive"] }
 gpui = { package = "gpui-fast", version = "=0.1.10", default-features = false, features = ["font-kit", "windows-manifest"] }
 gpui_platform = { package = "gpui-fast-platform", version = "=0.1.10" }
@@ -18,7 +19,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sys-locale = "0.3"
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_System_Registry", "Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Dwm", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_System_LibraryLoader"] }
+windows-sys = { version = "0.61", features = ["Win32_System_Registry", "Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_Security", "Win32_Security_Credentials", "Win32_Security_Authentication_Identity", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_System_LibraryLoader"] }
 [dev-dependencies]
 alacritty_terminal = "=0.25.1"
 [profile.release]
@@ -28,3 +29,7 @@ strip = "symbols"
 
 [workspace]
 members = [".", "vendor/gpui-terminal"]
+exclude = ["vendor/portable-pty"]
+
+[patch.crates-io]
+portable-pty = { path = "vendor/portable-pty" }

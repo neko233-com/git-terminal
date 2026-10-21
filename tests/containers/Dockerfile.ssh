@@ -1,0 +1,10 @@
+FROM debian:bookworm-slim
+LABEL com.git-terminal.fixture="ssh-acceptance"
+RUN apt-get update && apt-get install -y --no-install-recommends openssh-server ca-certificates \
+    && rm -rf /var/lib/apt/lists/* && mkdir /run/sshd \
+    && useradd -m -s /bin/bash terminal && passwd -d terminal \
+    && printf '%s\n' 'PasswordAuthentication yes' 'PermitEmptyPasswords no' \
+       'PermitRootLogin no' 'AllowUsers terminal' 'Subsystem sftp internal-sftp' \
+       'AuthorizedKeysFile /fixture/authorized_keys' 'StrictModes no' > /etc/ssh/sshd_config
+EXPOSE 22
+CMD ["/usr/sbin/sshd", "-D", "-e"]

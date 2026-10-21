@@ -6,6 +6,7 @@ pub fn profile_name(profile: &str) -> &'static str {
         "bash" => "Bash",
         "powershell" => "PowerShell",
         "cmd" => "CMD",
+        "ssh" => "SSH",
         _ => "Shell",
     }
 }

@@ -9,16 +9,28 @@ function global:prompt {
     $branch = ''
     if ($PWD.Provider.Name -eq 'FileSystem' -and $env:GIT_NEXT_EXECUTABLE) {
         $candidate = $PWD.ProviderPath
-        $found = [bool]$env:GIT_DIR
+        $gitDir = $env:GIT_DIR
+        $found = [bool]$gitDir
         while (-not $found -and $candidate) {
-            $found = Test-Path -LiteralPath (Join-Path $candidate '.git')
+            $gitDir = Join-Path $candidate '.git'
+            $found = Test-Path -LiteralPath $gitDir
             if (-not $found) { $candidate = [IO.Path]::GetDirectoryName($candidate) }
         }
         if ($found) {
-            $previousNativeExit = $global:LASTEXITCODE
-            $branch = & $env:GIT_NEXT_EXECUTABLE -C $PWD.ProviderPath symbolic-ref --quiet --short HEAD 2>$null
-            if (-not $branch) { $branch = & $env:GIT_NEXT_EXECUTABLE -C $PWD.ProviderPath rev-parse --short HEAD 2>$null }
-            $global:LASTEXITCODE = $previousNativeExit
+            try {
+                if (-not [IO.Path]::IsPathRooted($gitDir)) { $gitDir = Join-Path $PWD.ProviderPath $gitDir }
+                if ([IO.File]::Exists($gitDir)) {
+                    $link = [IO.File]::ReadAllText($gitDir).TrimEnd("`r", "`n")
+                    if ($link.StartsWith('gitdir: ')) {
+                        $target = $link.Substring(8)
+                        if (-not [IO.Path]::IsPathRooted($target)) { $target = Join-Path ([IO.Path]::GetDirectoryName($gitDir)) $target }
+                        $gitDir = $target
+                    }
+                }
+                $head = [IO.File]::ReadAllText((Join-Path $gitDir 'HEAD')).TrimEnd("`r", "`n")
+                if ($head.StartsWith('ref: refs/heads/')) { $branch = $head.Substring(16) }
+                elseif ($head -match '^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$') { $branch = $head.Substring(0, 7) }
+            } catch { $branch = '' }
         }
     }
     if ($branch) { Write-Host ('[' + $branch + '] ') -NoNewline -ForegroundColor Magenta }

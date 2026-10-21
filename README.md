@@ -1,6 +1,12 @@
 # Git-Terminal
 
-Rust + GPUI Fast desktop terminal for Windows. This independent Git submodule sits beside git-next. The Windows git-next MSI installs both products and a Git-Terminal Start menu shortcut.
+[Git-Terminal 0.2.0 downloads](https://github.com/neko233-com/git-terminal/releases/tag/v0.2.0) include Windows x64/ARM64 portable packages and complete git-next MSI bundles. The Git engine retains the accepted git-next 0.3.0 bytes; this release changes the terminal component to 0.2.0.
+
+For an existing installation, close Git-Terminal and run the matching architecture/scope MSI with `REINSTALL=ALL REINSTALLMODE=vomus` (a Windows Installer small update). New installations omit those properties. Machine packages require administrator elevation; `-user.msi` is the per-user variant. Match the existing scope. This recaches the complete repair/uninstall payload and preserves git-next, shortcuts, Git/SSH configuration and credentials. A standalone ZIP needs an existing git-next runtime for Bash; otherwise select native PowerShell/CMD.
+
+The existing Git product update task remains responsible for Git releases. Install this separate terminal component update explicitly; it does not change the Git engine version or updater comparison. No standalone terminal automatic update is claimed. Linux/macOS Git packages are unchanged.
+
+A native Rust + GPUI Fast terminal and SSH workspace for Windows. This independent Git submodule sits beside git-next. The Windows git-next MSI installs both products and a Git-Terminal Start menu shortcut.
 
 The application renders real ConPTY sessions through GPUI Fast, without opening an external terminal. It provides tabs, ANSI/true color, alternate screens, Unicode/Chinese input, selection, scrollback, bracketed paste, copy/paste, font zoom, resize, exit handling and owned process cleanup. There is no Git GUI interface.
 
@@ -63,3 +69,31 @@ The default Bash prompt shows the current directory and Git branch, with a short
 Sessions inherit the launcher's environment, including explicit HOME, temporary-directory and proxy overrides. Startup does not replace those values with registry defaults. On Windows the installation initializes the bundled runtime's pinned mount configuration, including the per-user temporary directory. Package acceptance stages the same defaults in a disposable copy.
 
 `--no-profile` skips user startup files while retaining the owned prompt/highlighter. `--no-shell-integration` selects ordinary shell startup. Set `syntax_highlighting` to false to disable native coloring. Set `git_prompt` to false to use your own prompt; native Bash coloring follows the managed prompt. Explicit `--command` execution keeps the normal command/exit semantics.
+
+
+## SSH workspace, SFTP and monitoring
+
+Open **SSH** in the title bar to manage hosts. Add a name, group and host/address or OpenSSH alias; user, port, identity file and config file are optional. A blank port keeps the SSH config value. Import reads explicit Host aliases from the selected config; OpenSSH itself still resolves Include, ProxyJump, agents, certificates and other connection options. Editing or deleting a saved host affects future connections, not an already open SSH tab. Ctrl+T duplicates the active SSH connection; the shell menu opens a local profile.
+
+Connect opens a real SSH PTY inside a tab. On Windows the system OpenSSH is preferred so its native agent works; the owned runtime provides the fallback. Known-host verification remains enabled according to OpenSSH configuration. Terminal login takes place in the remote tab. Background SFTP/monitor connections use the bundled native authentication dialog when needed. Passwords/passphrases are not written to hosts.json or logs; use an SSH agent to reuse unlocked keys. Each connection and its subprocesses belong to this application's lifetime. Failed SSH tabs retain their output and offer Reconnect.
+
+Select a host to open its SFTP pane. Click directories to navigate, use ↑ to go up, **Upload…** to choose files/directories, or drag files from Explorer onto the file pane. Right-click an entry and choose **Download…** to save a file or directory. The directory refreshes after successful transfers. The queue runs at most two transfers concurrently, shows bytes/state, and supports cancellation. Up to 256 operations can wait. Large directories use a virtual list, and file data uses bounded 64 KiB blocks with 16 requests in flight.
+
+Individual files are staged to unique .part names and installed only when complete. Existing remote files require explicit replacement and server support for atomic POSIX rename. Directory transfers merge per file; they are not a transaction for the entire tree. Symbolic links and Windows reparse points are not followed. Unsafe names, malformed packets and unexpected response IDs fail. A cancelled or disconnected transfer preserves the original destination; cleanup is best effort if the peer/network has already disappeared. Local incomplete files are removed. SFTP requests have a 60-second inactivity timeout; cancellation allows a short cleanup interval before terminating the owned SSH process. Closing the last terminal tab keeps an active transfer queue visible; exiting the app cancels owned work.
+
+**Monitor** opens a read-only Linux panel with OS/timezone, uptime, per-core CPU, memory/cache, network counters/rates, per-device disk I/O and filesystem capacity. It reads /proc and /sys over one SSH channel; it installs no agent and needs no root privileges. First-sample rates show an ellipsis until a second sample establishes a delta. The interval is saved per host (1/2/5/10 seconds in the UI), and Pause/Resume controls sampling. Closing the panel or changing hosts stops the old monitor. Non-Linux hosts retain SSH/SFTP; their monitor reports the missing adapter clearly.
+
+```powershell
+git-terminal remote add production user@example.invalid --group Production
+git-terminal remote import C:\Users\you\.ssh\config
+git-terminal remote hosts
+git-terminal --ssh production
+git-terminal remote list production /srv
+git-terminal remote put production .\build /srv/build
+git-terminal remote get production /srv/logs .\logs
+git-terminal remote monitor production --count 2
+```
+
+Saved connections are in `%APPDATA%\git-terminal\hosts.json` (or the XDG config directory on POSIX). Existing corrupt/unreadable host configuration is not silently replaced. Monitoring is Linux-only; desktop runtime acceptance targets Windows x64, and Windows ARM64 is separately cross-built and packaged. Mac runtime acceptance is not claimed.
+
+The managed local prompts read HEAD directly for normal branches, worktrees and detached HEAD. Root paths are joined without a double leading slash, preventing Windows/MSYS from turning /HEAD into a UNC network lookup. The Windows host uses system ConPTY rather than a conpty.dll found on PATH. Supplementary Unicode input uses the negotiated Win32 input protocol, preserving emoji and supplementary CJK characters on the system console host. Pipe writes and resize calls run off the UI thread; hidden tabs answer terminal protocol requests without requiring a repaint. Output processing yields to keyboard/window work and coalesces hidden-tab titles/bells. It never records terminal contents.

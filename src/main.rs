@@ -1,9 +1,17 @@
 // Copyright 2026 git-next contributors. MIT license.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod assets;
+#[cfg(windows)]
+mod conpty_input;
+mod field;
+mod monitor;
 mod presentation;
+mod remote;
+mod remote_cli;
+mod remote_ui;
 mod session;
 mod settings;
+mod sftp;
 #[cfg(all(test, windows))]
 mod shell_acceptance;
 
@@ -39,6 +47,8 @@ struct Options {
     no_shell_integration: bool,
     #[arg(long,default_value="auto",value_parser=["auto","bash","powershell","cmd","shell"])]
     shell: String,
+    #[arg(long, conflicts_with = "command")]
+    ssh: Option<String>,
     #[arg(long)]
     command: Option<String>,
     #[arg(long)]
@@ -52,6 +62,10 @@ struct Options {
 }
 #[derive(Subcommand, Clone)]
 enum Action {
+    Remote {
+        #[command(subcommand)]
+        action: remote_cli::RemoteAction,
+    },
     Language {
         #[command(subcommand)]
         action: LanguageAction,
@@ -71,6 +85,7 @@ struct Tab {
     context: TabContext,
     _session: Session,
     terminal: Entity<TerminalView>,
+    remote: Option<remote::Host>,
 }
 struct Desktop {
     tabs: Vec<Tab>,
@@ -82,6 +97,9 @@ struct Desktop {
     command_exit: Arc<AtomicU32>,
     profile_menu: bool,
     tab_scroll: ScrollHandle,
+    remote: remote_ui::Workspace,
+    _remote_events: Task<()>,
+    window: AnyWindowHandle,
 }
 
 impl Desktop {
@@ -89,10 +107,23 @@ impl Desktop {
         setup: Setup,
         settings: Settings,
         command: Option<String>,
+        remote_host: Option<remote::Host>,
         command_exit: Arc<AtomicU32>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let remote = remote_ui::Workspace::new();
+        let receiver = remote.receiver.clone();
+        let remote_events = cx.spawn(async move |this, cx| {
+            while let Ok(event) = receiver.recv_async().await {
+                if this
+                    .update(cx, |app: &mut Self, cx| app.apply_remote_event(event, cx))
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
         let mut desktop = Self {
             tabs: Vec::new(),
             active: 0,
@@ -103,19 +134,47 @@ impl Desktop {
             command_exit,
             profile_menu: false,
             tab_scroll: ScrollHandle::new(),
+            remote,
+            _remote_events: remote_events,
+            window: window.window_handle(),
         };
         presentation::dark_caption();
-        desktop.add_tab(command, window, cx);
+        desktop.add_tab_for(command, remote_host, window, cx);
         desktop
     }
     fn add_tab(&mut self, command: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
+        let remote = if command.is_none() {
+            self.tabs
+                .get(self.active)
+                .and_then(|tab| tab.remote.clone())
+        } else {
+            None
+        };
+        self.add_tab_for(command, remote, window, cx);
+    }
+    fn open_ssh(&mut self, host: remote::Host, window: &mut Window, cx: &mut Context<Self>) {
+        self.add_tab_for(None, Some(host), window, cx);
+    }
+    fn add_tab_for(
+        &mut self,
+        command: Option<String>,
+        remote: Option<remote::Host>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let mut setup = self.setup.clone();
         if command.is_none()
             && let Some(tab) = self.tabs.get(self.active)
         {
             setup.cwd = tab.context.cwd.clone();
         }
-        let result = Session::spawn(&setup, command.as_deref());
+        let result = if let Some(host) = &remote {
+            remote::ssh_executable(setup.git.as_deref())
+                .and_then(|ssh| remote::terminal_command(host, &ssh, &setup.cwd))
+                .and_then(Session::from_command)
+        } else {
+            Session::spawn(&setup, command.as_deref())
+        };
         let (session, writer, reader) = match result {
             Ok(v) => v,
             Err(e) => {
@@ -129,9 +188,10 @@ impl Desktop {
         };
         let id = self.next_id;
         self.next_id += 1;
-        let master = session.master.clone();
+        let resize = session.resize.clone();
         let shell_exit = session.exit.clone();
         let command_exit = command.as_ref().map(|_| self.command_exit.clone());
+        let ssh_session = remote.is_some();
         let parent = cx.weak_entity();
         let title_parent = parent.clone();
         let config = TerminalConfig {
@@ -158,20 +218,22 @@ impl Desktop {
         };
         let terminal = cx.new(|cx| {
             TerminalView::new(writer, reader, config, cx)
-                .with_syntax_highlighting(setup.profile == "bash" && setup.syntax_highlighting)
+                .with_syntax_highlighting(
+                    remote.is_none() && setup.profile == "bash" && setup.syntax_highlighting,
+                )
                 .with_resize_callback(move |cols, rows| {
-                    if let Some(master) = master.lock().as_ref() {
-                        let _ = master.resize(portable_pty::PtySize {
-                            cols: cols.min(1000) as u16,
-                            rows: rows.min(1000) as u16,
-                            pixel_width: 0,
-                            pixel_height: 0,
-                        });
-                    }
+                    let _ = resize.send(portable_pty::PtySize {
+                        cols: cols.min(1000) as u16,
+                        rows: rows.min(1000) as u16,
+                        pixel_width: 0,
+                        pixel_height: 0,
+                    });
                 })
                 .with_title_callback(move |window, cx, title| {
                     let _ = title_parent.update(cx, |app, cx| {
-                        if let Some(tab) = app.tabs.iter_mut().find(|t| t.id == id) {
+                        if let Some(tab) = app.tabs.iter_mut().find(|t| t.id == id)
+                            && tab.remote.is_none()
+                        {
                             tab.context.update(title);
                         }
                         window.set_window_title("Git-Terminal");
@@ -181,6 +243,16 @@ impl Desktop {
                 .with_exit_callback(move |window, cx| {
                     if let Some(result) = &command_exit {
                         result.store(shell_exit.lock().unwrap_or(1), Ordering::Release);
+                    }
+                    if ssh_session && shell_exit.lock().is_some_and(|status| status != 0) {
+                        let _ = parent.update(cx, |app, cx| {
+                            app.error = Some(
+                                "SSH connection ended. Review the terminal output and reconnect."
+                                    .into(),
+                            );
+                            cx.notify();
+                        });
+                        return;
                     }
                     let parent = parent.clone();
                     let handle = window.window_handle();
@@ -193,11 +265,17 @@ impl Desktop {
                 })
         });
         terminal.read(cx).focus_handle().clone().focus(window, cx);
+        let mut context = TabContext::new(setup.cwd, setup.profile);
+        if let Some(host) = &remote {
+            context.label = host.name.clone();
+            context.profile = "ssh".into();
+        }
         self.tabs.push(Tab {
             id,
-            context: TabContext::new(setup.cwd, setup.profile),
+            context,
             _session: session,
             terminal,
+            remote,
         });
         self.active = self.tabs.len() - 1;
         self.tab_scroll.scroll_to_item(self.active);
@@ -216,7 +294,15 @@ impl Desktop {
     }
     fn close(&mut self, id: u64, window: &mut Window, cx: &mut Context<Self>) {
         self.remove_tab(id);
-        if self.tabs.is_empty() {
+        if self.tabs.is_empty()
+            && self
+                .remote
+                .transfers
+                .iter()
+                .any(|t| matches!(t.state.as_str(), "queued" | "running"))
+        {
+            self.remote.right = true;
+        } else if self.tabs.is_empty() {
             window.remove_window();
         } else {
             self.focus(window, cx);
@@ -233,6 +319,39 @@ impl Desktop {
     }
     fn key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let k = &event.keystroke;
+        if let Some(editor) = &self.remote.editor {
+            if matches!(k.key.as_str(), "enter" | "escape")
+                && editor.fields.iter().any(|field| field.read(cx).composing())
+            {
+                return;
+            }
+            if k.key == "escape" {
+                self.remote.editor = None;
+                self.focus(window, cx);
+                cx.stop_propagation();
+                cx.notify();
+            } else if k.key == "tab" {
+                let n = editor.fields.len();
+                let selected = editor
+                    .fields
+                    .iter()
+                    .position(|field| field.read(cx).is_focused(window))
+                    .unwrap_or(0);
+                let next = (selected + if k.modifiers.shift { n - 1 } else { 1 }) % n;
+                editor.fields[next]
+                    .read(cx)
+                    .focus_handle()
+                    .focus(window, cx);
+                cx.stop_propagation();
+            } else if k.key == "enter" {
+                self.save_host_editor(cx);
+                cx.stop_propagation();
+                if self.remote.editor.is_none() {
+                    self.focus(window, cx);
+                }
+            }
+            return;
+        }
         let mut handled = true;
         if k.key == "escape" && self.profile_menu {
             self.profile_menu = false;
@@ -286,7 +405,7 @@ impl Desktop {
                 self.setup = setup;
                 self.settings.shell = profile.into();
                 let _ = self.settings.save();
-                self.add_tab(None, window, cx);
+                self.add_tab_for(None, None, window, cx);
             }
             Err(e) => {
                 self.error = Some(e.to_string());
@@ -299,6 +418,9 @@ impl Desktop {
 impl Render for Desktop {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let chinese = self.settings.chinese();
+        let show_hosts = self.remote.visible
+            && (!self.remote.right || window.viewport_size().width >= px(1050.));
+        let host_editor = self.render_host_editor(cx);
         let mut tabs = div()
             .id("tabs")
             .flex()
@@ -405,7 +527,22 @@ impl Render for Desktop {
         let directory = self
             .tabs
             .get(self.active)
-            .map(|tab| tab.context.cwd.to_string_lossy().into_owned())
+            .map(|tab| {
+                tab.remote
+                    .as_ref()
+                    .map(|host| {
+                        format!(
+                            "ssh://{}{}",
+                            if host.user.is_empty() {
+                                String::new()
+                            } else {
+                                format!("{}@", host.user)
+                            },
+                            host.destination
+                        )
+                    })
+                    .unwrap_or_else(|| tab.context.cwd.to_string_lossy().into_owned())
+            })
             .unwrap_or_default();
         let profile = self
             .tabs
@@ -507,6 +644,68 @@ impl Render for Desktop {
                     .child(tabs)
                     .child(
                         div()
+                            .id("ssh-toggle")
+                            .px_2()
+                            .py_1()
+                            .rounded_md()
+                            .cursor_pointer()
+                            .text_color(rgb(0x85cbcf))
+                            .hover(|s| s.bg(rgb(0x252e3f)))
+                            .child("SSH")
+                            .on_click(cx.listener(|app, _, window, cx| {
+                                app.remote.visible = !app.remote.visible;
+                                if app.remote.visible && window.viewport_size().width < px(1050.) {
+                                    app.remote.right = false;
+                                    app.remote.stop_monitor();
+                                }
+                                cx.notify();
+                            })),
+                    )
+                    .children(
+                        (self.remote.selected.is_some() || !self.remote.transfers.is_empty()).then(
+                            || {
+                                div()
+                                    .id("remote-toggle")
+                                    .px_2()
+                                    .py_1()
+                                    .rounded_md()
+                                    .cursor_pointer()
+                                    .child("⇄")
+                                    .on_click(cx.listener(|app, _, _, cx| {
+                                        app.remote.right = !app.remote.right;
+                                        if !app.remote.right {
+                                            app.remote.stop_monitor();
+                                        }
+                                        cx.notify();
+                                    }))
+                            },
+                        ),
+                    )
+                    .children(
+                        self.tabs
+                            .get(self.active)
+                            .filter(|tab| {
+                                tab.remote.is_some() && tab._session.exit.lock().is_some()
+                            })
+                            .map(|tab| {
+                                let host = tab.remote.clone().unwrap();
+                                let id = tab.id;
+                                div()
+                                    .id("ssh-reconnect")
+                                    .px_2()
+                                    .py_1()
+                                    .rounded_md()
+                                    .cursor_pointer()
+                                    .text_color(rgb(0x85cbcf))
+                                    .child(if chinese { "重连" } else { "Reconnect" })
+                                    .on_click(cx.listener(move |app, _, window, cx| {
+                                        app.open_ssh(host.clone(), window, cx);
+                                        app.close(id, window, cx);
+                                    }))
+                            }),
+                    )
+                    .child(
+                        div()
                             .id("new-tab")
                             .w(px(36.))
                             .h(px(36.))
@@ -582,10 +781,20 @@ impl Render for Desktop {
             )
             .child(
                 div()
+                    .flex()
                     .flex_1()
                     .min_h_0()
                     .overflow_hidden()
-                    .children(terminal),
+                    .children(show_hosts.then(|| self.render_remote_sidebar(cx)))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .h_full()
+                            .overflow_hidden()
+                            .children(terminal),
+                    )
+                    .children(self.remote.right.then(|| self.render_remote_panel(cx))),
             )
             .child(
                 div()
@@ -616,6 +825,7 @@ impl Render for Desktop {
                     .child(div().flex_shrink_0().child(profile)),
             )
             .children(menu)
+            .children(host_editor)
     }
 }
 
@@ -639,6 +849,10 @@ fn window_control(id: &'static str, glyph: &'static str, area: WindowControlArea
 fn run() -> Result<u32> {
     let options = Options::parse();
     let mut settings = Settings::load();
+    if let Some(Action::Remote { action }) = &options.action {
+        remote_cli::run(action, options.git.as_deref())?;
+        return Ok(0);
+    }
     if let Some(Action::Language { action }) = &options.action {
         if let LanguageAction::Set { language } = action {
             settings.language = language.clone();
@@ -665,6 +879,11 @@ fn run() -> Result<u32> {
         &options.shell
     };
     let mut setup = Setup::discover(&cwd, profile, options.git.as_deref())?;
+    let remote_host = options
+        .ssh
+        .as_deref()
+        .map(remote_cli::resolve)
+        .transpose()?;
     setup.no_profile = options.no_profile;
     if options.no_shell_integration {
         setup.integration = None;
@@ -705,7 +924,15 @@ fn run() -> Result<u32> {
                 move |window, cx| {
                     let command_exit = view_exit.clone();
                     cx.new(|cx| {
-                        Desktop::new(setup, settings, options.command, command_exit, window, cx)
+                        Desktop::new(
+                            setup,
+                            settings,
+                            options.command,
+                            remote_host,
+                            command_exit,
+                            window,
+                            cx,
+                        )
                     })
                 },
             );

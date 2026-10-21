@@ -1,7 +1,6 @@
 # Copyright 2026 git-next contributors. MIT license.
 # This file is an owned Bash rc file; user profiles stay in their normal locations.
 __git_terminal_integration_dir=${BASH_SOURCE[0]%/*}
-__git_terminal_integration_dir=$(builtin cd -- "$__git_terminal_integration_dir" && builtin pwd -P)
 if [[ ${GIT_TERMINAL_LOAD_PROFILE:-1} == 1 ]]; then
   [[ ! -r /etc/profile ]] || builtin source /etc/profile
   for __git_terminal_profile in "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.profile"; do

@@ -30,7 +30,7 @@ fn find_command(name: &str) -> Option<PathBuf> {
 }
 
 #[cfg(windows)]
-fn windows_shell_path(path: &Path) -> PathBuf {
+pub(crate) fn windows_shell_path(path: &Path) -> PathBuf {
     use std::os::windows::ffi::{OsStrExt, OsStringExt};
     let mut units: Vec<u16> = path
         .as_os_str()
@@ -182,11 +182,7 @@ impl Setup {
             cmd.env(key, value);
         }
         #[cfg(windows)]
-        let cwd = if self.profile == "cmd" {
-            windows_shell_path(&self.cwd)
-        } else {
-            self.cwd.clone()
-        };
+        let cwd = windows_shell_path(&self.cwd);
         #[cfg(not(windows))]
         let cwd = self.cwd.clone();
         cmd.cwd(cwd);
@@ -239,7 +235,9 @@ impl Setup {
                 );
                 cmd.env("CHERE_INVOKING", "1");
                 cmd.env("MSYS2_PATH_TYPE", "inherit");
-                if let Some(home) = std::env::var_os("USERPROFILE") {
+                if let Some(home) =
+                    std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))
+                {
                     cmd.env("HOME", home);
                 }
             }
@@ -321,11 +319,12 @@ impl Setup {
 type SessionIo = (Session, Box<dyn Write + Send>, Box<dyn Read + Send>);
 
 pub struct Session {
-    pub master: Arc<parking_lot::Mutex<Option<Box<dyn MasterPty + Send>>>>,
+    pub _master: Arc<parking_lot::Mutex<Option<Box<dyn MasterPty + Send>>>>,
+    pub resize: std::sync::mpsc::Sender<PtySize>,
     killer: Box<dyn ChildKiller + Send + Sync>,
     pub exit: Arc<parking_lot::Mutex<Option<u32>>>,
     #[cfg(windows)]
-    job: Option<OwnedJob>,
+    job: Arc<parking_lot::Mutex<Option<OwnedJob>>>,
 }
 
 impl Session {
@@ -333,7 +332,7 @@ impl Session {
         Self::from_command(setup.command(command))
     }
 
-    fn from_command(command: CommandBuilder) -> Result<SessionIo> {
+    pub(crate) fn from_command(command: CommandBuilder) -> Result<SessionIo> {
         let pair = native_pty_system().openpty(PtySize {
             rows: 30,
             cols: 110,
@@ -356,26 +355,47 @@ impl Session {
             }
         };
         let killer = child.clone_killer();
+        #[cfg(windows)]
+        let job = Arc::new(parking_lot::Mutex::new(job));
+        #[cfg(windows)]
+        let exit_job = job.clone();
         let exit = Arc::new(parking_lot::Mutex::new(None));
         let status = exit.clone();
         let ready = Arc::new(parking_lot::Condvar::new());
         let notify_ready = ready.clone();
         let writer = pair.master.take_writer()?;
         let reader = pair.master.try_clone_reader()?;
+        #[cfg(windows)]
+        let (reader, writer) = crate::conpty_input::wrap(reader, writer);
         drop(pair.slave);
         let master = Arc::new(parking_lot::Mutex::new(Some(pair.master)));
+        let resize_master = master.clone();
+        let (resize, changes) = std::sync::mpsc::channel::<PtySize>();
+        std::thread::spawn(move || {
+            while let Ok(mut size) = changes.recv() {
+                while let Ok(latest) = changes.try_recv() {
+                    size = latest;
+                }
+                let master = resize_master.lock();
+                let Some(master) = master.as_ref() else { break };
+                let _ = master.resize(size);
+            }
+        });
         let close_master = master.clone();
         std::thread::spawn(move || {
             let result = child.wait();
             *status.lock() = Some(result.map(|s| s.exit_code()).unwrap_or(1));
             notify_ready.notify_all();
+            #[cfg(windows)]
+            drop(exit_job.lock().take());
             // Close ConPTY off the UI thread so its reader can drain and receive EOF.
             let owned_master = close_master.lock().take();
             drop(owned_master);
         });
         Ok((
             Self {
-                master,
+                _master: master,
+                resize,
                 killer,
                 exit: exit.clone(),
                 #[cfg(windows)]
@@ -424,7 +444,7 @@ impl Read for ExitAwareReader {
 impl Drop for Session {
     fn drop(&mut self) {
         #[cfg(windows)]
-        drop(self.job.take());
+        drop(self.job.lock().take());
         if self.exit.lock().is_none() {
             let _ = self.killer.kill();
         }
@@ -432,10 +452,10 @@ impl Drop for Session {
 }
 
 #[cfg(windows)]
-struct OwnedJob(usize);
+pub(crate) struct OwnedJob(usize);
 #[cfg(windows)]
 impl OwnedJob {
-    fn new(pid: u32) -> Result<Self> {
+    pub(crate) fn new(pid: u32) -> Result<Self> {
         use windows_sys::Win32::{
             Foundation::CloseHandle,
             System::{JobObjects::*, Threading::*},
@@ -499,7 +519,7 @@ mod tests {
         }
         let (session, writer, mut reader) = Session::from_command(command).unwrap();
         session
-            .master
+            ._master
             .lock()
             .as_ref()
             .unwrap()

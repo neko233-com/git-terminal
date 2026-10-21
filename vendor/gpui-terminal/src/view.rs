@@ -53,6 +53,7 @@ use crate::input::keystroke_to_bytes;
 use crate::render::TerminalRenderer;
 use crate::terminal::TerminalState;
 use gpui::{Edges, *};
+use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::sync::Arc;
 use std::sync::mpsc;
@@ -382,10 +383,11 @@ pub struct TerminalView {
     focus_handle: FocusHandle,
 
     /// Writer for sending input to the terminal process
-    stdin_writer: Arc<parking_lot::Mutex<Box<dyn Write + Send>>>,
+    stdin_writer: crate::io::InputWriter,
 
     /// Receiver for terminal events from the event proxy
     event_rx: mpsc::Receiver<TerminalEvent>,
+    pending_events: VecDeque<TerminalEvent>,
 
     /// Configuration used to create this terminal
     config: TerminalConfig,
@@ -483,9 +485,7 @@ impl TerminalView {
         let focus_handle = cx.focus_handle();
 
         // Wrap stdin writer in Arc<Mutex> for thread-safe access
-        let stdin_writer = Arc::new(parking_lot::Mutex::new(
-            Box::new(stdin_writer) as Box<dyn Write + Send>
-        ));
+        let stdin_writer = crate::io::InputWriter::new(stdin_writer);
 
         // Create async channel for bytes (push-based notification)
         // Using flume instead of smol::channel because flume is executor-agnostic
@@ -501,6 +501,7 @@ impl TerminalView {
         // Spawn async task that awaits on the channel and notifies the view
         // This is push-based: the task blocks until bytes arrive, then immediately notifies
         let reader_task = cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let mut last_yield = std::time::Instant::now();
             loop {
                 // Wait for bytes from the background reader (blocks until data arrives)
                 match bytes_rx.recv_async().await {
@@ -514,11 +515,18 @@ impl TerminalView {
                         // Process bytes and notify the view
                         let result = this.update(cx, |view: &mut Self, cx: &mut Context<Self>| {
                             view.state.process_bytes(&bytes);
+                            view.process_protocol_events();
                             cx.notify();
                         });
                         if result.is_err() {
                             // View was dropped, exit
                             break;
+                        }
+                        if last_yield.elapsed() >= std::time::Duration::from_millis(4) {
+                            cx.background_executor()
+                                .timer(std::time::Duration::from_millis(1))
+                                .await;
+                            last_yield = std::time::Instant::now();
                         }
                     }
                     Err(_) => {
@@ -539,6 +547,7 @@ impl TerminalView {
             renderer,
             focus_handle,
             stdin_writer,
+            pending_events: VecDeque::new(),
             event_rx,
             config,
             _reader_task: reader_task,
@@ -743,9 +752,7 @@ impl TerminalView {
             term.scroll_display(alacritty_terminal::grid::Scroll::Bottom);
             term.selection = None;
         });
-        let mut writer = self.stdin_writer.lock();
-        let _ = writer.write_all(bytes);
-        let _ = writer.flush();
+        self.stdin_writer.send(bytes);
     }
     pub fn paste_text(&mut self, text: &str) {
         let text = text.replace('\u{1b}', "");
@@ -874,18 +881,18 @@ impl TerminalView {
         };
         window.focus(&self.focus_handle, cx);
         let point = self.cell(event.position);
-        if !event.modifiers.shift {
-            if let Some(bytes) = crate::mouse::mouse_button_report(
+        if !event.modifiers.shift
+            && let Some(bytes) = crate::mouse::mouse_button_report(
                 event.button,
                 true,
                 point,
                 crate::mouse::encode_modifiers(false, event.modifiers.alt, event.modifiers.control),
                 self.state.mode(),
-            ) {
-                self.send_input(&bytes);
-                cx.notify();
-                return;
-            }
+            )
+        {
+            self.send_input(&bytes);
+            cx.notify();
+            return;
         }
         if event.button == MouseButton::Right {
             self.paste_clipboard(cx);
@@ -903,16 +910,16 @@ impl TerminalView {
     }
     fn on_mouse_up(&mut self, event: &MouseUpEvent, _window: &mut Window, cx: &mut Context<Self>) {
         let point = self.cell(event.position);
-        if !event.modifiers.shift {
-            if let Some(bytes) = crate::mouse::mouse_button_report(
+        if !event.modifiers.shift
+            && let Some(bytes) = crate::mouse::mouse_button_report(
                 event.button,
                 false,
                 point,
                 crate::mouse::encode_modifiers(false, event.modifiers.alt, event.modifiers.control),
                 self.state.mode(),
-            ) {
-                self.send_input(&bytes);
-            }
+            )
+        {
+            self.send_input(&bytes);
         }
         cx.notify();
     }
@@ -970,18 +977,18 @@ impl TerminalView {
         if amount == 0 {
             return;
         }
-        if !event.modifiers.shift {
-            if let Some(bytes) = crate::mouse::scroll_report(
+        if !event.modifiers.shift
+            && let Some(bytes) = crate::mouse::scroll_report(
                 amount,
                 point,
                 crate::mouse::encode_modifiers(false, event.modifiers.alt, event.modifiers.control),
                 self.state.mode(),
-            ) {
-                self.send_input(&bytes);
-                cx.stop_propagation();
-                cx.notify();
-                return;
-            }
+            )
+        {
+            self.send_input(&bytes);
+            cx.stop_propagation();
+            cx.notify();
+            return;
         }
         self.state
             .with_term_mut(|t| t.scroll_display(alacritty_terminal::grid::Scroll::Delta(amount)));
@@ -994,7 +1001,7 @@ impl TerminalView {
     /// This method drains all available events from the event receiver
     /// and handles them appropriately. Note: bytes are processed in the
     /// async reader task, not here.
-    fn process_events(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn process_protocol_events(&mut self) {
         // Process terminal events (from alacritty event proxy)
         while let Ok(event) = self.event_rx.try_recv() {
             match event {
@@ -1006,6 +1013,7 @@ impl TerminalView {
                     };
                     let reply = match event {
                         Event::PtyWrite(text) => text,
+                        Event::ClipboardLoad(_, format) => format(""),
                         Event::ColorRequest(index, format) => {
                             let color = if index < 256 {
                                 Color::Indexed(index as u8)
@@ -1036,13 +1044,39 @@ impl TerminalView {
                         }),
                         _ => String::new(),
                     };
-                    let mut writer = self.stdin_writer.lock();
-                    let _ = writer.write_all(reply.as_bytes());
-                    let _ = writer.flush();
+                    self.stdin_writer.send(reply.as_bytes());
                 }
                 TerminalEvent::Wakeup => {
                     // Terminal has new content - already handled by async task
                 }
+                event @ TerminalEvent::Title(_) => {
+                    self.pending_events
+                        .retain(|old| !matches!(old, TerminalEvent::Title(_)));
+                    self.pending_events.push_back(event);
+                }
+                event @ TerminalEvent::Bell => {
+                    if !self
+                        .pending_events
+                        .iter()
+                        .any(|old| matches!(old, TerminalEvent::Bell))
+                    {
+                        self.pending_events.push_back(event);
+                    }
+                }
+                event @ TerminalEvent::ClipboardStore(_) => {
+                    self.pending_events
+                        .retain(|old| !matches!(old, TerminalEvent::ClipboardStore(_)));
+                    self.pending_events.push_back(event);
+                }
+                other => self.pending_events.push_back(other),
+            }
+        }
+    }
+
+    fn process_events(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.process_protocol_events();
+        while let Some(event) = self.pending_events.pop_front() {
+            match event {
                 TerminalEvent::Bell => {
                     if let Some(ref callback) = self.bell_callback {
                         callback(window, cx);
@@ -1074,6 +1108,7 @@ impl TerminalView {
                         callback(window, cx);
                     }
                 }
+                TerminalEvent::Response(_) | TerminalEvent::Wakeup => unreachable!(),
             }
         }
     }

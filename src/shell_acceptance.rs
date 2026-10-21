@@ -41,6 +41,96 @@ impl Drop for OwnedFixture {
 }
 
 #[test]
+#[ignore = "requires an installed owned Git runtime"]
+fn headless_shell_responsiveness() {
+    let git = PathBuf::from(std::env::var_os("GIT_TERMINAL_TEST_GIT").unwrap());
+    for profile in ["bash", "powershell", "cmd"] {
+        let root = std::env::temp_dir().join(format!(
+            "git-terminal-latency-{}-{profile}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let _owned = OwnedFixture(root.clone());
+        let mut setup = Setup::discover(&root, profile, Some(&git)).unwrap();
+        setup.no_profile = true;
+        setup.integration =
+            Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("shell-integration"));
+        let mut command = setup.command(None);
+        for name in [
+            "HOME",
+            "USERPROFILE",
+            "APPDATA",
+            "LOCALAPPDATA",
+            "SSH_ROOT_PATH",
+        ] {
+            command.env(name, &root);
+        }
+        let started = Instant::now();
+        let (session, mut writer, mut reader) = Session::from_command(command).unwrap();
+        let (tx, rx) = mpsc::channel();
+        let task = std::thread::spawn(move || {
+            let mut buffer = [0; 16384];
+            while let Ok(count) = reader.read(&mut buffer) {
+                if count == 0 || tx.send(buffer[..count].to_vec()).is_err() {
+                    break;
+                }
+            }
+        });
+        let (events_tx, events_rx) = mpsc::channel();
+        let mut terminal = TerminalState::new(110, 30, GpuiEventProxy::new(events_tx));
+        let mut received = Vec::new();
+        let input = match profile {
+            "bash" => "printf '\\107\\124_OK\\n'\r",
+            "powershell" => "[Console]::WriteLine(('GT_'+'OK'))\r",
+            _ => "echo GT_^OK\r",
+        };
+        writer.write_all(input.as_bytes()).unwrap();
+        let mut replies = 0;
+        while started.elapsed() < Duration::from_secs(3) {
+            if let Ok(bytes) = rx.recv_timeout(Duration::from_millis(10)) {
+                terminal.process_bytes(&bytes);
+                received.extend_from_slice(&bytes);
+                if received.len() <= 32 {
+                    eprintln!("initial fixture controls: {bytes:02x?}");
+                }
+            }
+            while let Ok(event) = events_rx.try_recv() {
+                if let TerminalEvent::Response(event) = event {
+                    let reply = match event {
+                        Event::PtyWrite(text) => text,
+                        Event::ColorRequest(_, format) => format(Rgb {
+                            r: 18,
+                            g: 21,
+                            b: 27,
+                        }),
+                        _ => String::new(),
+                    };
+                    replies += 1;
+                    writer.write_all(reply.as_bytes()).unwrap();
+                }
+            }
+            if received.windows(5).any(|s| s == b"GT_OK") {
+                break;
+            }
+        }
+        eprintln!(
+            "fixture {profile}: {} ms, {} bytes, {replies} replies",
+            started.elapsed().as_millis(),
+            received.len()
+        );
+        if !received.windows(5).any(|s| s == b"GT_OK") {
+            eprintln!("fixture-only bytes: {received:02x?}");
+        }
+        let found = received.windows(5).any(|s| s == b"GT_OK");
+        drop(session);
+        drop(writer);
+        drop(rx);
+        task.join().unwrap();
+        assert!(found, "{profile} did not run the first command");
+    }
+}
+
+#[test]
 #[ignore = "requires the owned full Git/Bash distribution; run by consolidated acceptance"]
 fn shell_features_real_pty() {
     let git = PathBuf::from(
@@ -102,7 +192,7 @@ fn shell_features_real_pty() {
         .to_owned();
     let mut setup = Setup::discover(&nested, "bash", Some(&git)).unwrap();
     setup.no_profile = true;
-    setup.integration = Some(git.parent().unwrap().join("shell-integration"));
+    setup.integration = Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("shell-integration"));
     let (session, mut writer, mut reader) = Session::spawn(&setup, None).unwrap();
     let (bytes_tx, bytes_rx) = mpsc::sync_channel(32);
     let read_task = std::thread::spawn(move || {

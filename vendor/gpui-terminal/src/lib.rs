@@ -342,6 +342,7 @@ pub mod colors;
 pub mod event;
 pub mod highlight;
 pub mod input;
+mod io;
 pub mod mouse;
 pub mod render;
 pub mod terminal;
