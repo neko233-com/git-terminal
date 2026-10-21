@@ -311,7 +311,6 @@ def main():
             record('actual-gpui-gpu-window-chinese-and-color-screenshot',rendering)
             def selection():
                 assert clipboard_saved, "Clipboard snapshot is required before copy"
-                activate_owned(hwnd);time.sleep(.2)
                 image=ImageGrab.grab(bbox=bounds(hwnd));x0,y0,x1,y1=bounds(hwnd);scale=u.GetDpiForWindow(hwnd)/96
                 background=image.getpixel((image.width-3,image.height//2))
                 top=next(y for y in range(10,min(200,image.height//2)) if all(image.getpixel((image.width-3,y+offset))==background for offset in range(5)))
@@ -323,16 +322,12 @@ def main():
                 target_y=(bands[1][0]+bands[1][1])/2 if len(bands)>1 else top+43*scale
                 copied=False
                 for dy in (0,-3,3):
-                    activate_owned(hwnd);u.SetCursorPos(int(x0+25*scale),int(y0+target_y+dy*scale))
+                    focused(hwnd);u.SetCursorPos(int(x0+25*scale),int(y0+target_y+dy*scale))
                     for _ in range(2):
                         send(hwnd,[Input(0,Payload(mouse=Mouse(0,0,0,2,0,0))),Input(0,Payload(mouse=Mouse(0,0,0,4,0,0)))]);time.sleep(.08)
-                    shortcut(hwnd,0x11,0x10,0x43)
-                    deadline=time.monotonic()+.8
-                    while time.monotonic()<deadline:
-                        if 'COPY_MARKER_GIT_TERMINAL' in clipboard_text():copied=True;break
-                        time.sleep(.025)
-                    if copied:break
-                assert copied, 'The owned marker was not copied after selecting its row'
+                    shortcut(hwnd,0x11,0x10,0x43);time.sleep(.15)
+                    if 'COPY_MARKER_GIT_TERMINAL' in clipboard_text():copied=True;break
+                assert copied
             record('native-mouse-selection-and-copy',selection)
             def history():
                 ready=root/'history.txt';command(hwnd,"printf 'history-%s\\n' {1..180}; printf ready > "+quote(ready));wait_file(ready,'ready');time.sleep(.3)
@@ -341,7 +336,7 @@ def main():
                 shortcut(hwnd,0x10,0x21);time.sleep(.25)
                 after=hashlib.sha256(ImageGrab.grab(bbox=bounds(hwnd)).crop(region).tobytes()).hexdigest();assert before!=after
                 shortcut(hwnd,0x10,0x22);time.sleep(.2)
-                x0,y0,x1,y1=bounds(hwnd);activate_owned(hwnd);u.SetCursorPos(x0+150,y0+250)
+                x0,y0,x1,y1=bounds(hwnd);focused(hwnd);u.SetCursorPos(x0+150,y0+250)
                 send(hwnd,[Input(0,Payload(mouse=Mouse(0,0,120*3,0x0800,0,0)))]);time.sleep(.25)
                 wheel=hashlib.sha256(ImageGrab.grab(bbox=bounds(hwnd)).crop(region).tobytes()).hexdigest();assert wheel!=before
             record('native-shift-page-and-mouse-wheel-scrollback',history)
