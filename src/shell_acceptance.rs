@@ -10,6 +10,7 @@ use gpui_terminal::{
     event::{GpuiEventProxy, TerminalEvent},
     terminal::TerminalState,
 };
+use std::os::windows::process::CommandExt;
 use std::{
     io::{Read, Write},
     path::PathBuf,
@@ -58,6 +59,7 @@ fn shell_features_real_pty() {
     let _fixture = OwnedFixture(root.clone());
     let run_git = |args: &[&str]| {
         let output = Command::new(&git)
+            .creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW)
             .args(args)
             .current_dir(root.join("repo"))
             .output()
