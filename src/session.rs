@@ -26,6 +26,22 @@ fn find_command(name: &str) -> Option<PathBuf> {
         .find(|p| p.is_file())
 }
 
+#[cfg(windows)]
+fn windows_shell_path(path: &Path) -> PathBuf {
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    let mut units: Vec<u16> = path
+        .as_os_str()
+        .encode_wide()
+        .map(|v| if v == 47 { 92 } else { v })
+        .collect();
+    if units.starts_with(&[92, 92, 63, 92]) && units.get(5) == Some(&58) {
+        units.drain(..4);
+    } else if units.starts_with(&[92, 92, 63, 92, 85, 78, 67, 92]) {
+        units.splice(..8, [92, 92]);
+    }
+    PathBuf::from(std::ffi::OsString::from_wide(&units))
+}
+
 impl Setup {
     pub fn discover(cwd: &Path, profile: &str, explicit_git: Option<&Path>) -> Result<Self> {
         let cwd = cwd
@@ -114,7 +130,8 @@ impl Setup {
             "cmd" if cfg!(windows) => PathBuf::from(
                 std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into()),
             )
-            .join("System32/cmd.exe"),
+            .join("System32")
+            .join("cmd.exe"),
             "shell" if !cfg!(windows) => {
                 PathBuf::from(std::env::var_os("SHELL").unwrap_or_else(|| "/bin/sh".into()))
             }
@@ -133,8 +150,26 @@ impl Setup {
     }
 
     pub fn command(&self, command: Option<&str>) -> CommandBuilder {
-        let mut cmd = CommandBuilder::new(&self.shell);
-        cmd.cwd(&self.cwd);
+        #[cfg(windows)]
+        let shell = if self.profile == "cmd" && command.is_some() {
+            std::env::current_exe()
+                .unwrap_or_default()
+                .with_file_name("git-terminal-shell.exe")
+        } else {
+            windows_shell_path(&self.shell)
+        };
+        #[cfg(not(windows))]
+        let shell = self.shell.clone();
+        let mut cmd = CommandBuilder::new(shell);
+        #[cfg(windows)]
+        let cwd = if self.profile == "cmd" {
+            windows_shell_path(&self.cwd)
+        } else {
+            self.cwd.clone()
+        };
+        #[cfg(not(windows))]
+        let cwd = self.cwd.clone();
+        cmd.cwd(cwd);
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
         cmd.env("TERM_PROGRAM", "Git-Terminal");
@@ -198,11 +233,10 @@ impl Setup {
                 }
             }
             "cmd" => {
-                cmd.arg("/d");
                 if let Some(command) = command {
-                    cmd.arg("/s");
-                    cmd.arg("/c");
                     cmd.arg(command);
+                } else {
+                    cmd.arg("/d");
                 }
             }
             _ => {

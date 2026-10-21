@@ -47,3 +47,5 @@ Build with Rust 1.96+, the Windows SDK and Visual Studio C++ tools. Complete imp
 GPUI Fast is pinned to 0.1.10. The attributed component under vendor/gpui-terminal derives from zortax/gpui-terminal 0.1.0 and uses Alacritty's terminal engine. [Local changes and preserved licenses](vendor/gpui-terminal/MODIFICATIONS.md).
 
 ARM64 builds use the pinned isolated LLVM MinGW SDK: set CARGO_TARGET_AARCH64_PC_WINDOWS_GNULLVM_LINKER to aarch64-w64-mingw32-clang.exe, put its bin directory on PATH and package the separately pinned libunwind.dll with its notices. The git-next tools/prepare_git_terminal.py performs these checks and collects dependency notices.
+
+CMD uses native Windows separators and an owned console helper for explicit command scripts, preserving CMD quoting, environment expansion, ConPTY inheritance and exit status. The helper is bundled with the app.
