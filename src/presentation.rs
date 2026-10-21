@@ -98,8 +98,12 @@ pub fn dark_caption() {
     use windows_sys::Win32::{
         Foundation::{HWND, LPARAM},
         Graphics::Dwm::DwmSetWindowAttribute,
+        System::LibraryLoader::GetModuleHandleW,
         System::Threading::{GetCurrentProcessId, GetCurrentThreadId},
-        UI::WindowsAndMessaging::{EnumThreadWindows, GetWindowThreadProcessId},
+        UI::WindowsAndMessaging::{
+            EnumThreadWindows, GetSystemMetrics, GetWindowThreadProcessId, IMAGE_ICON, LR_SHARED,
+            LoadImageW, SM_CXICON, SM_CXSMICON, SM_CYICON, SM_CYSMICON, SendMessageW, WM_SETICON,
+        },
     };
     unsafe extern "system" fn apply(hwnd: HWND, _: LPARAM) -> i32 {
         let mut process = 0;
@@ -112,6 +116,21 @@ pub fn dark_caption() {
             unsafe {
                 DwmSetWindowAttribute(hwnd, 20, (&dark as *const i32).cast(), 4);
                 DwmSetWindowAttribute(hwnd, 35, (&color as *const u32).cast(), 4);
+                for (kind, width, height) in
+                    [(1, SM_CXICON, SM_CYICON), (0, SM_CXSMICON, SM_CYSMICON)]
+                {
+                    let icon = LoadImageW(
+                        GetModuleHandleW(std::ptr::null()),
+                        std::ptr::without_provenance::<u16>(1),
+                        IMAGE_ICON,
+                        GetSystemMetrics(width),
+                        GetSystemMetrics(height),
+                        LR_SHARED,
+                    );
+                    if !icon.is_null() {
+                        SendMessageW(hwnd, WM_SETICON, kind, icon as isize);
+                    }
+                }
             }
         }
         1

@@ -4,6 +4,10 @@ Rust + GPUI Fast desktop terminal for Windows. This independent Git submodule si
 
 The application renders real ConPTY sessions through GPUI Fast, without opening an external terminal. It provides tabs, ANSI/true color, alternate screens, Unicode/Chinese input, selection, scrollback, bracketed paste, copy/paste, font zoom, resize, exit handling and owned process cleanup. There is no Git GUI interface.
 
+Windows uses one integrated native title/tab bar with an embedded application icon, drag regions and native minimize/maximize/close hit areas, including the system Snap menu. The original terminal/branch icon is embedded in the EXE in nine sizes for Explorer, taskbar, Alt+Tab and installed shortcuts; no icon download is needed. Its SVG source is in `assets/git-terminal.svg`; `python tools/render_icon.py` regenerates the PNG/ICO using Pillow.
+
+Desktop acceptance copies clipboard formats eagerly into memory and restores them without retaining a cross-process OLE object. Clipboard contents are never logged or written to fixture files. Unsupported formats fail before mutation.
+
 The bundled default is its owned Bash shell, retaining familiar Git Bash commands and existing HOME configuration. PowerShell and CMD profiles are available. Every session prepends the installed git-next runtime to PATH. git-next owns installation and the protected old-Git handoff; this application leaves repositories and credential storage in place.
 
 ~~~powershell

@@ -11,10 +11,10 @@ import tempfile
 import time
 
 from PIL import ImageGrab
+from clipboard_snapshot import ClipboardSnapshot
 
 u = c.WinDLL('user32', use_last_error=True)
 k = c.WinDLL('kernel32', use_last_error=True)
-ole = c.OleDLL('ole32')
 u.SetProcessDPIAware()
 u.GetForegroundWindow.restype = w.HWND
 u.SetForegroundWindow.argtypes = [w.HWND]
@@ -37,8 +37,6 @@ k.GlobalAlloc.restype = w.HGLOBAL
 k.GlobalLock.argtypes = [w.HGLOBAL]
 k.GlobalLock.restype = c.c_void_p
 k.GlobalUnlock.argtypes = [w.HGLOBAL]
-ole.OleGetClipboard.argtypes = [c.POINTER(c.c_void_p)]
-ole.OleSetClipboard.argtypes = [c.c_void_p]
 u.GetClipboardOwner.restype = w.HWND
 u.AttachThreadInput.argtypes = [w.DWORD,w.DWORD,w.BOOL]
 u.SetFocus.argtypes = [w.HWND]
@@ -101,6 +99,7 @@ def window_for(pid):
 def focused(hwnd):
     actual=w.DWORD();u.GetWindowThreadProcessId(hwnd,c.byref(actual))
     assert actual.value==WINDOW_OWNERS.get(hwnd), 'Window ownership changed; input refused'
+    if u.GetForegroundWindow()!=hwnd:activate_owned(hwnd)
     assert u.GetForegroundWindow()==hwnd, 'Focus changed; no input sent to another application'
 
 
@@ -146,6 +145,7 @@ def type_text(hwnd,text):
 
 
 def command(hwnd,text):
+    shortcut(hwnd,0x11,0x55)
     type_text(hwnd,text)
     shortcut(hwnd,0x0D)
 
@@ -155,7 +155,8 @@ def wait_file(path,expected=None):
         try:value=path.read_text(encoding='utf-8')
         except (OSError,UnicodeError):return False
         return value==expected if expected is not None else bool(value.strip())
-    wait_for(ready)
+    try:wait_for(ready)
+    except AssertionError:raise AssertionError('Owned fixture file did not reach the expected state: '+path.name) from None
     return path.read_text(encoding='utf-8')
 
 
@@ -215,8 +216,7 @@ def main():
     parser.add_argument('--paste-key',choices=('auto','ctrl-shift-v','shift-insert'),default='auto')
     args=parser.parse_args();binary=args.binary.resolve(strict=True);git=args.git.resolve(strict=True)
     output=args.output.resolve();output.parent.mkdir(parents=True,exist_ok=True)
-    results=[];process=None;original_clipboard=c.c_void_p();clipboard_saved=False;fixture_clipboard=''
-    ole.OleInitialize(None)
+    results=[];process=None;original_clipboard=ClipboardSnapshot();clipboard_saved=False;fixture_clipboard=''
     clipboard_window=u.CreateWindowExW(0,'STATIC','',0,0,0,0,0,w.HWND(-3),None,None,None)
     assert clipboard_window, 'Owned clipboard fixture window could not be created'
     hotkey_conflict=False
@@ -276,7 +276,7 @@ def main():
             def paste():
                 nonlocal clipboard_saved,fixture_clipboard
                 focused(hwnd)
-                assert ole.OleGetClipboard(c.byref(original_clipboard))>=0;clipboard_saved=True
+                original_clipboard.capture();clipboard_saved=True
                 path=root/'clipboard.txt';fixture_clipboard="printf '%s' 'clipboard-中文' > "+quote(path);set_clipboard(clipboard_window,fixture_clipboard)
                 assert clipboard_text()==fixture_clipboard
                 shortcut(hwnd,*( [0x11,0x10,0x56] if args.paste_key=='ctrl-shift-v' else [0x10,0x2D] ));time.sleep(.2);shortcut(hwnd,0x0D);wait_file(path,'clipboard-中文')
@@ -297,12 +297,33 @@ def main():
                 command(hwnd,"printf '%s' \"$GIT_TERMINAL_TAB\" > "+quote(exited));wait_file(exited,'first')
             record('native-keyboard-tabs-independent-shells-and-close',tabs)
             def resize():
-                before=root/'width-before.txt';after=root/'width-after.txt'
-                command(hwnd,"stty size > "+quote(before));wait_file(before)
-                u.SetWindowPos(hwnd,None,40,40,920,650,4);time.sleep(.5)
-                command(hwnd,"stty size > "+quote(after));wait_file(after)
-                assert int(before.read_text().split()[1])!=int(after.read_text().split()[1])
+                before=root/'width-before.txt';after=root/'width-after.txt';go=root/'resize-go'
+                script="while [ ! -f "+quote(go)+" ]; do stty size > "+quote(before)+"; sleep .05; done; stty size > "+quote(after)
+                probe=subprocess.Popen([str(binary),'--shell','bash','--no-profile','--git',str(git),'--cwd',str(repo),'--command',script],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+                try:
+                    owned=wait_for(lambda:window_for(probe.pid));u.SetWindowPos(owned,None,40,40,1120,720,4)
+                    wait_file(before);time.sleep(.4);columns=int(before.read_text().split()[1])
+                    u.SetWindowPos(owned,None,40,40,920,650,4);time.sleep(.4);go.write_bytes(b'go')
+                    wait_file(after);assert columns!=int(after.read_text().split()[1]);assert probe.wait(timeout=10)==0
+                finally:
+                    if probe.poll() is None:
+                        u.PostMessageW(window_for(probe.pid),0x10,0,0);probe.wait(timeout=10)
             record('native-window-resize-reaches-conpty',resize)
+            def native_chrome():
+                assert u.SendMessageW(hwnd,0x7F,1,0) and u.SendMessageW(hwnd,0x7F,0,0), 'Embedded application icons are missing'
+                x0,y0,x1,_=bounds(hwnd);scale=u.GetDpiForWindow(hwnd)/96
+                for offset,expected in ((23,20),(69,9),(115,8)):
+                    x,y=int(x1-offset*scale),int(y0+24*scale)
+                    u.SetCursorPos(x,y);time.sleep(.08)
+                    assert u.SendMessageW(hwnd,0x84,0,(y&0xffff)<<16|(x&0xffff))==expected, 'Native caption hit area differs'
+                x,y=int(x0+24*scale),int(y0+24*scale)
+                u.SetCursorPos(x,y);time.sleep(.08)
+                assert u.SendMessageW(hwnd,0x84,0,(y&0xffff)<<16|(x&0xffff))==2, 'Native drag region is missing'
+                u.SetCursorPos(int(x0+200*scale),int(y0+120*scale))
+                u.SetWindowPos(hwnd,None,40,40,int(560*scale),int(340*scale),4);time.sleep(.3)
+                screenshot(hwnd,output.with_name(output.stem+'-compact.png'),frame=True)
+                u.SetWindowPos(hwnd,None,40,40,1120,720,4);activate_owned(hwnd);time.sleep(.3)
+            record('embedded-icon-native-caption-hit-areas-and-compact-window',native_chrome)
             def rendering():
                 ready=root/'render.txt';command(hwnd,"printf '\\033[2J\\033[HGit-Terminal 中文 / UTF-8\\nCOPY_MARKER_GIT_TERMINAL\\n'; printf ready > "+quote(ready))
                 wait_file(ready,'ready');time.sleep(.4)
@@ -310,6 +331,7 @@ def main():
                 image.save(output.with_suffix('.png'))
             record('actual-gpui-gpu-window-chinese-and-color-screenshot',rendering)
             def selection():
+                nonlocal fixture_clipboard
                 assert clipboard_saved, "Clipboard snapshot is required before copy"
                 image=ImageGrab.grab(bbox=bounds(hwnd));x0,y0,x1,y1=bounds(hwnd);scale=u.GetDpiForWindow(hwnd)/96
                 background=image.getpixel((image.width-3,image.height//2))
@@ -322,11 +344,13 @@ def main():
                 target_y=(bands[1][0]+bands[1][1])/2 if len(bands)>1 else top+43*scale
                 copied=False
                 for dy in (0,-3,3):
-                    focused(hwnd);u.SetCursorPos(int(x0+25*scale),int(y0+target_y+dy*scale))
-                    for _ in range(2):
-                        send(hwnd,[Input(0,Payload(mouse=Mouse(0,0,0,2,0,0))),Input(0,Payload(mouse=Mouse(0,0,0,4,0,0)))]);time.sleep(.08)
+                    focused(hwnd);u.SetCursorPos(int(x0+14*scale),int(y0+target_y+dy*scale))
+                    send(hwnd,[Input(0,Payload(mouse=Mouse(0,0,0,2,0,0)))]);time.sleep(.1)
+                    u.SetCursorPos(int(x0+330*scale),int(y0+target_y+dy*scale));time.sleep(.15)
+                    send(hwnd,[Input(0,Payload(mouse=Mouse(0,0,0,4,0,0)))])
                     shortcut(hwnd,0x11,0x10,0x43);time.sleep(.15)
-                    if 'COPY_MARKER_GIT_TERMINAL' in clipboard_text():copied=True;break
+                    if 'COPY_MARKER_GIT_TERMINAL' in clipboard_text():
+                        fixture_clipboard=clipboard_text();copied=True;break
                 assert copied
             record('native-mouse-selection-and-copy',selection)
             def history():
@@ -360,9 +384,7 @@ def main():
                             if owner:u.GetWindowThreadProcessId(owner,c.byref(owner_pid))
                             owned_text=clipboard_text()
                             if owner_pid.value in (os.getpid(),process.pid if process else 0) or owned_text==fixture_clipboard or owned_text.strip()=='COPY_MARKER_GIT_TERMINAL':
-                                restored=ole.OleSetClipboard(original_clipboard)
-                                if restored>=0:restored=ole.OleFlushClipboard()
-                                assert restored>=0, 'Original clipboard restoration was refused'
+                                original_clipboard.restore(clipboard_window)
                                 results.append(dict(case='original-clipboard-restored',status='pass'))
                             else:
                                 results.append(dict(case='new-external-clipboard-change-preserved',status='pass'))
@@ -373,9 +395,7 @@ def main():
                                 break
                             time.sleep(.1)
             finally:
-                if original_clipboard:
-                    table=c.cast(original_clipboard,c.POINTER(c.POINTER(c.c_void_p))).contents
-                    c.WINFUNCTYPE(w.ULONG,c.c_void_p)(table[2])(original_clipboard)
+                original_clipboard.close()
                 if process:
                     hwnd=window_for(process.pid)
                     if hwnd:u.PostMessageW(hwnd,0x10,0,0)
@@ -409,8 +429,8 @@ def main():
                 if p.poll() is None:subprocess.run([os.path.join(os.environ['SystemRoot'],'System32/taskkill.exe'),'/PID',str(p.pid),'/T','/F'],capture_output=True,timeout=10)
         record('bounded-output-drain-and-command-exit-without-ui-deadlock',burst_exit)
 
-    u.DestroyWindow(clipboard_window);ole.OleUninitialize()
-    value=dict(status='pass' if all(item['status']=='pass' for item in results) else 'fail',scope='selected' if args.only_case else 'all',paste_key=args.paste_key,ctrl_shift_v_registered_elsewhere=hotkey_conflict,platform='windows-x64',renderer='gpui-fast',input_delivery='owned HWND WM_CHAR UTF-16 commits; SendInput keyboard shortcuts',binary_sha256=hashlib.file_digest(binary.open('rb'),'sha256').hexdigest(),seconds=round(time.monotonic()-start,3),personal_profile_accessed=False,terminal_contents_logged=False,results=results)
+    u.DestroyWindow(clipboard_window)
+    value=dict(status='pass' if all(item['status']=='pass' for item in results) else 'fail',scope='selected' if args.only_case else 'all',paste_key=args.paste_key,ctrl_shift_v_registered_elsewhere=hotkey_conflict,platform='windows-x64',renderer='gpui-fast',input_delivery='owned HWND WM_CHAR UTF-16 commits; SendInput keyboard shortcuts',binary_sha256=hashlib.file_digest(binary.open('rb'),'sha256').hexdigest(),git_sha256=hashlib.file_digest(git.open('rb'),'sha256').hexdigest(),harness_sha256=hashlib.file_digest(Path(__file__).open('rb'),'sha256').hexdigest(),clipboard_harness_sha256=hashlib.file_digest(Path(__file__).with_name('clipboard_snapshot.py').open('rb'),'sha256').hexdigest(),seconds=round(time.monotonic()-start,3),personal_profile_accessed=False,terminal_contents_logged=False,results=results)
     output.write_text(json.dumps(value,indent=2)+'\n',encoding='utf-8');print(json.dumps(value))
     raise SystemExit(value['status']!='pass')
 

@@ -1,5 +1,6 @@
 // Copyright 2026 git-next contributors. MIT license.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod assets;
 mod presentation;
 mod session;
 mod settings;
@@ -296,7 +297,7 @@ impl Desktop {
 }
 
 impl Render for Desktop {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let chinese = self.settings.chinese();
         let mut tabs = div()
             .id("tabs")
@@ -417,7 +418,7 @@ impl Render for Desktop {
                     .id("profile-menu")
                     .absolute()
                     .top(px(49.))
-                    .right(px(10.))
+                    .right(px(if cfg!(windows) { 148. } else { 10. }))
                     .w(px(240.))
                     .p_2()
                     .rounded_lg()
@@ -488,11 +489,21 @@ impl Render for Desktop {
                     .flex()
                     .items_center()
                     .gap_1()
-                    .pt_2()
-                    .px_2()
+                    .pl_2()
                     .h(px(48.))
                     .flex_shrink_0()
                     .bg(rgb(0x171c26))
+                    .child(
+                        div()
+                            .id("app-icon")
+                            .w(px(32.))
+                            .h_full()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .window_control_area(WindowControlArea::Drag)
+                            .child(img("git-terminal.png").size(px(22.))),
+                    )
                     .child(tabs)
                     .child(
                         div()
@@ -529,7 +540,40 @@ impl Render for Desktop {
                                 app.profile_menu = !app.profile_menu;
                                 cx.notify();
                             })),
-                    ),
+                    )
+                    .child(
+                        div()
+                            .id("window-drag")
+                            .w(px(32.))
+                            .h_full()
+                            .flex_shrink_0()
+                            .window_control_area(WindowControlArea::Drag),
+                    )
+                    .children(cfg!(windows).then(|| {
+                        div()
+                            .flex()
+                            .h_full()
+                            .flex_shrink_0()
+                            .child(window_control(
+                                "window-minimize",
+                                "\u{e921}",
+                                WindowControlArea::Min,
+                            ))
+                            .child(window_control(
+                                "window-maximize",
+                                if window.is_maximized() {
+                                    "\u{e923}"
+                                } else {
+                                    "\u{e922}"
+                                },
+                                WindowControlArea::Max,
+                            ))
+                            .child(window_control(
+                                "window-close",
+                                "\u{e8bb}",
+                                WindowControlArea::Close,
+                            ))
+                    })),
             )
             .children(
                 self.error
@@ -573,6 +617,23 @@ impl Render for Desktop {
             )
             .children(menu)
     }
+}
+
+fn window_control(id: &'static str, glyph: &'static str, area: WindowControlArea) -> Stateful<Div> {
+    let close = matches!(area, WindowControlArea::Close);
+    div()
+        .id(id)
+        .w(px(46.))
+        .h_full()
+        .flex()
+        .items_center()
+        .justify_center()
+        .font_family("Segoe MDL2 Assets")
+        .text_size(px(10.))
+        .text_color(rgb(0xdfe7f3))
+        .window_control_area(area)
+        .hover(move |s| s.bg(rgb(if close { 0xc42b1c } else { 0x303a4b })))
+        .child(glyph)
 }
 
 fn run() -> Result<u32> {
@@ -619,40 +680,43 @@ fn run() -> Result<u32> {
     let command_exit = Arc::new(AtomicU32::new(0));
     let result_exit = command_exit.clone();
     let view_exit = command_exit.clone();
-    gpui_platform::application().run(move |cx| {
-        cx.set_window_appearance(Some(WindowAppearance::Dark));
-        cx.on_window_closed(|cx, _| {
-            if cx.windows().is_empty() {
-                cx.quit();
-            }
-        })
-        .detach();
-        let bounds = Bounds::centered(None, size(px(1120.), px(720.)), cx);
-        let result = cx.open_window(
-            WindowOptions {
-                window_bounds: Some(WindowBounds::Windowed(bounds)),
-                window_min_size: Some(size(px(560.), px(340.))),
-                titlebar: Some(TitlebarOptions {
-                    title: Some("Git-Terminal".into()),
+    gpui_platform::application()
+        .with_assets(assets::Assets)
+        .run(move |cx| {
+            cx.set_window_appearance(Some(WindowAppearance::Dark));
+            cx.on_window_closed(|cx, _| {
+                if cx.windows().is_empty() {
+                    cx.quit();
+                }
+            })
+            .detach();
+            let bounds = Bounds::centered(None, size(px(1120.), px(720.)), cx);
+            let result = cx.open_window(
+                WindowOptions {
+                    window_bounds: Some(WindowBounds::Windowed(bounds)),
+                    window_min_size: Some(size(px(560.), px(340.))),
+                    titlebar: Some(TitlebarOptions {
+                        title: Some("Git-Terminal".into()),
+                        appears_transparent: cfg!(windows),
+                        ..Default::default()
+                    }),
                     ..Default::default()
-                }),
-                ..Default::default()
-            },
-            move |window, cx| {
-                let command_exit = view_exit.clone();
-                cx.new(|cx| {
-                    Desktop::new(setup, settings, options.command, command_exit, window, cx)
-                })
-            },
-        );
-        if let Err(error) = result {
-            result_exit.store(1, Ordering::Release);
-            eprintln!("Git-Terminal: {error}");
-            cx.quit();
-        } else {
-            cx.activate(true);
-        }
-    });
+                },
+                move |window, cx| {
+                    let command_exit = view_exit.clone();
+                    cx.new(|cx| {
+                        Desktop::new(setup, settings, options.command, command_exit, window, cx)
+                    })
+                },
+            );
+            if let Err(error) = result {
+                result_exit.store(1, Ordering::Release);
+                eprintln!("Git-Terminal: {error}");
+                cx.quit();
+            } else {
+                cx.activate(true);
+            }
+        });
     Ok(command_exit.load(Ordering::Acquire))
 }
 fn main() {
