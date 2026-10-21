@@ -157,6 +157,7 @@ impl Desktop {
         };
         let terminal = cx.new(|cx| {
             TerminalView::new(writer, reader, config, cx)
+                .with_syntax_highlighting(setup.profile == "bash" && setup.syntax_highlighting)
                 .with_resize_callback(move |cols, rows| {
                     if let Some(master) = master.lock().as_ref() {
                         let _ = master.resize(portable_pty::PtySize {

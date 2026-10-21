@@ -22,7 +22,7 @@ __git_terminal_update_prompt() {
   label=$PWD
   label+="${branch:+ [$branch]}"
   label=${label//[[:cntrl:]]/?}
-  printf '\033]0;%s\007' "$label"
+  printf '\033]0;git-terminal-prompt:%s\007' "$label"
   return "$previous_status"
 }
 

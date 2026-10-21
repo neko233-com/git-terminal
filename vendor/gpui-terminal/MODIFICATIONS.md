@@ -13,6 +13,8 @@ Local changes by git-next contributors, 2026:
 - Route protocol replies, color queries and size requests back to the owned PTY.
 - Apply configured scrollback and keep lifecycle under the host application.
 - Reserve host tab shortcuts Ctrl+T/W, Ctrl+Shift+T/W and Ctrl+Tab before PTY input.
+- Color managed Bash input natively, without changing shell input/output or its readline editor.
+- Retry transient clipboard contention asynchronously without blocking rendering.
 
 Alacritty provides VT parsing and grid semantics. Portable-pty provides ConPTY.
 The host owns shells, tabs, Windows jobs, settings and installation integration.

@@ -413,9 +413,16 @@ pub struct TerminalView {
     exit_callback: Option<ExitCallback>,
     metrics: std::rc::Rc<std::cell::Cell<(Bounds<Pixels>, Pixels, Pixels)>>,
     preedit: String,
+    syntax_highlighting: bool,
+    prompt_active: bool,
 }
 
 impl TerminalView {
+    /// Color the managed Bash input without replacing its editor or changing PTY bytes.
+    pub fn with_syntax_highlighting(mut self, enabled: bool) -> Self {
+        self.syntax_highlighting = enabled;
+        self
+    }
     /// Create a new terminal with provided I/O streams.
     ///
     /// This method initializes a new terminal emulator with the given stdin writer
@@ -543,6 +550,8 @@ impl TerminalView {
             exit_callback: None,
             metrics: std::rc::Rc::new(std::cell::Cell::new((Bounds::default(), px(8.), px(16.)))),
             preedit: String::new(),
+            syntax_highlighting: false,
+            prompt_active: false,
         }
     }
 
@@ -727,6 +736,9 @@ impl TerminalView {
     /// to the stdin writer. If a key handler is set and returns true, the event
     /// is consumed and not sent to the terminal.
     pub fn send_input(&mut self, bytes: &[u8]) {
+        if bytes.iter().any(|byte| matches!(byte, b'\r' | b'\n')) {
+            self.prompt_active = false;
+        }
         self.state.with_term_mut(|term| {
             term.scroll_display(alacritty_terminal::grid::Scroll::Bottom);
             term.selection = None;
@@ -746,6 +758,33 @@ impl TerminalView {
         } else {
             self.send_input(text.replace("\r\n", "\n").replace('\n', "\r").as_bytes());
         }
+    }
+    fn paste_clipboard(&mut self, cx: &mut Context<Self>) {
+        if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
+            self.paste_text(&text);
+            return;
+        }
+        // Clipboard managers may briefly hold the Windows clipboard during a change.
+        cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            for delay in [8, 16, 32, 64] {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(delay))
+                    .await;
+                let done = this.update(cx, |view, cx| {
+                    if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
+                        view.paste_text(&text);
+                        cx.notify();
+                        true
+                    } else {
+                        false
+                    }
+                });
+                if !matches!(done, Ok(false)) {
+                    break;
+                }
+            }
+        })
+        .detach();
     }
     fn cell(&self, position: Point<Pixels>) -> alacritty_terminal::index::Point {
         use alacritty_terminal::{
@@ -785,9 +824,7 @@ impl TerminalView {
         if (k.modifiers.control && k.modifiers.shift && k.key == "v")
             || (k.modifiers.shift && k.key == "insert")
         {
-            if let Some(text) = cx.read_from_clipboard().and_then(|i| i.text()) {
-                self.paste_text(&text);
-            }
+            self.paste_clipboard(cx);
             cx.stop_propagation();
             cx.notify();
             return;
@@ -850,9 +887,7 @@ impl TerminalView {
             }
         }
         if event.button == MouseButton::Right {
-            if let Some(text) = cx.read_from_clipboard().and_then(|i| i.text()) {
-                self.paste_text(&text);
-            }
+            self.paste_clipboard(cx);
         } else if event.button == MouseButton::Left {
             let kind = match event.click_count {
                 2 => SelectionType::Semantic,
@@ -1013,8 +1048,15 @@ impl TerminalView {
                     }
                 }
                 TerminalEvent::Title(title) => {
+                    let title = if let Some(prompt) = title.strip_prefix("git-terminal-prompt:") {
+                        self.prompt_active = true;
+                        prompt
+                    } else {
+                        self.prompt_active = false;
+                        &title
+                    };
                     if let Some(ref callback) = self.title_callback {
-                        callback(window, cx, &title);
+                        callback(window, cx, title);
                     }
                 }
                 TerminalEvent::ClipboardStore(text) => {
@@ -1121,7 +1163,8 @@ impl Render for TerminalView {
 
         // Get terminal state and renderer for rendering
         let state_arc = self.state.term_arc();
-        let renderer = self.renderer.clone();
+        let mut renderer = self.renderer.clone();
+        renderer.syntax_highlighting = self.syntax_highlighting && self.prompt_active;
         let resize_callback = self.resize_callback.clone();
         let padding = self.config.padding;
         let metrics = self.metrics.clone();

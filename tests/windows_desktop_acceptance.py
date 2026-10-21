@@ -22,6 +22,7 @@ u.IsWindowVisible.argtypes = [w.HWND]
 u.OpenClipboard.argtypes = [w.HWND]
 u.GetWindowThreadProcessId.argtypes = [w.HWND,c.POINTER(w.DWORD)]
 u.GetClientRect.argtypes = [w.HWND,c.POINTER(w.RECT)]
+u.GetWindowRect.argtypes = [w.HWND,c.POINTER(w.RECT)]
 u.ClientToScreen.argtypes = [w.HWND,c.POINTER(w.POINT)]
 u.GetDpiForWindow.argtypes = [w.HWND]
 u.SetWindowPos.argtypes = [w.HWND,w.HWND,c.c_int,c.c_int,c.c_int,c.c_int,w.UINT]
@@ -43,6 +44,11 @@ u.AttachThreadInput.argtypes = [w.DWORD,w.DWORD,w.BOOL]
 u.SetFocus.argtypes = [w.HWND]
 u.SetFocus.restype = w.HWND
 u.ShowWindow.argtypes = [w.HWND,c.c_int]
+u.CreateWindowExW.argtypes = [w.DWORD,w.LPCWSTR,w.LPCWSTR,w.DWORD,c.c_int,c.c_int,c.c_int,c.c_int,w.HWND,w.HMENU,w.HINSTANCE,c.c_void_p]
+u.CreateWindowExW.restype = w.HWND
+u.DestroyWindow.argtypes = [w.HWND]
+u.SendMessageW.argtypes = [w.HWND,w.UINT,w.WPARAM,w.LPARAM]
+u.SendMessageW.restype = w.LPARAM
 k.GetCurrentThreadId.restype = w.DWORD
 WINDOW_OWNERS = {}
 
@@ -131,18 +137,24 @@ def shortcut(hwnd,*keys):
 
 def type_text(hwnd,text):
     units=text.encode('utf-16-le')
-    for offset in range(0,len(units),64):
-        events=[]
-        for index in range(offset,min(offset+64,len(units)),2):
-            unit=int.from_bytes(units[index:index+2],'little')
-            events += [Input(1,Payload(keyboard=Keyboard(0,unit,4,0,0))),Input(1,Payload(keyboard=Keyboard(0,unit,6,0,0)))]
-        send(hwnd,events)
-        time.sleep(.01)
+    for index in range(0,len(units),2):
+        actual=w.DWORD();u.GetWindowThreadProcessId(hwnd,c.byref(actual))
+        assert actual.value==WINDOW_OWNERS.get(hwnd), 'Window ownership changed; text input refused'
+        u.SendMessageW(hwnd,0x0102,int.from_bytes(units[index:index+2],'little'),1)
 
 
 def command(hwnd,text):
     type_text(hwnd,text)
     shortcut(hwnd,0x0D)
+
+
+def wait_file(path,expected=None):
+    def ready():
+        try:value=path.read_text(encoding='utf-8')
+        except (OSError,UnicodeError):return False
+        return value==expected if expected is not None else bool(value.strip())
+    wait_for(ready)
+    return path.read_text(encoding='utf-8')
 
 
 def bounds(hwnd):
@@ -152,10 +164,23 @@ def bounds(hwnd):
     return point.x,point.y,point.x+rect.right,point.y+rect.bottom
 
 
-def screenshot(hwnd,path):
+def screenshot(hwnd,path,frame=False):
     activate_owned(hwnd)
     focused(hwnd)
-    ImageGrab.grab(bbox=bounds(hwnd)).save(path)
+    box=bounds(hwnd)
+    if frame:
+        rect=w.RECT();assert u.GetWindowRect(hwnd,c.byref(rect))
+        box=(rect.left,rect.top,rect.right,rect.bottom)
+    ImageGrab.grab(bbox=box).save(path)
+
+
+def prompt_ready(hwnd):
+    activate_owned(hwnd)
+    image=ImageGrab.grab(bbox=bounds(hwnd))
+    for y in range(55,min(image.height-35,300)):
+        if sum(1 for x in range(14,42) if (lambda rgb:rgb[1]>rgb[0]+30 and rgb[1]>rgb[2]+25)(image.getpixel((x,y))[:3]))>=2:
+            return True
+    return False
 
 
 def clipboard_text():
@@ -188,6 +213,8 @@ def main():
     output=args.output.resolve();output.parent.mkdir(parents=True,exist_ok=True)
     results=[];process=None;original_clipboard=c.c_void_p();clipboard_saved=False;fixture_clipboard=''
     ole.OleInitialize(None)
+    clipboard_window=u.CreateWindowExW(0,'STATIC','',0,0,0,0,0,w.HWND(-3),None,None,None)
+    assert clipboard_window, 'Owned clipboard fixture window could not be created'
     start=time.monotonic()
     with tempfile.TemporaryDirectory(prefix='git-terminal-desktop-') as temporary:
         root=Path(temporary);home=root/'home';repo=root/'中文 repo';home.mkdir();repo.mkdir()
@@ -222,7 +249,7 @@ def main():
             subprocess.run([str(git),'init','--initial-branch=feature/tabs',str(repo)],env=env,capture_output=True,check=True,timeout=10)
             process=subprocess.Popen([str(binary),'--no-profile','--git',str(git),'--cwd',str(repo)],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
             hwnd=wait_for(lambda:window_for(process.pid));u.SetWindowPos(hwnd,None,40,40,1120,720,4);activate_owned(hwnd)
-            time.sleep(2)
+            wait_for(lambda:prompt_ready(hwnd),20);time.sleep(.5)
             shortcut(hwnd,0x1B);shortcut(hwnd,0x11,0x55)
             screenshot(hwnd,output.with_name(output.stem+'-startup.png'))
             def quote(path):
@@ -232,36 +259,37 @@ def main():
                 return '"'+executable+'" -NoLogo -NoProfile -NonInteractive -Command "'+source+'"'
             def typed():
                 path=root/'unicode.txt';command(hwnd,"printf '%s' '中文🙂' > "+quote(path))
-                wait_for(path.exists);assert path.read_text(encoding='utf-8')=='中文🙂'
-            record('real-window-native-unicode-text-input-and-pty',typed)
+                wait_file(path,'中文🙂')
+            record('native-window-wm-char-unicode-commit-and-pty',typed)
             def paste():
                 nonlocal clipboard_saved,fixture_clipboard
                 focused(hwnd)
                 assert ole.OleGetClipboard(c.byref(original_clipboard))>=0;clipboard_saved=True
-                path=root/'clipboard.txt';fixture_clipboard="printf '%s' 'clipboard-中文' > "+quote(path);set_clipboard(hwnd,fixture_clipboard)
-                shortcut(hwnd,0x11,0x10,0x56);shortcut(hwnd,0x0D);wait_for(path.exists);assert path.read_text(encoding='utf-8')=='clipboard-中文'
+                path=root/'clipboard.txt';fixture_clipboard="printf '%s' 'clipboard-中文' > "+quote(path);set_clipboard(clipboard_window,fixture_clipboard)
+                assert clipboard_text()==fixture_clipboard
+                shortcut(hwnd,0x11,0x10,0x56);time.sleep(.2);shortcut(hwnd,0x0D);wait_file(path,'clipboard-中文')
             record('native-clipboard-paste-with-original-preserved-in-memory',paste)
             def tabs():
                 first=root/'first.txt';second=root/'second.txt';returned=root/'returned.txt'
-                command(hwnd,"GIT_TERMINAL_TAB=first; printf first > "+quote(first));wait_for(first.exists)
+                command(hwnd,"GIT_TERMINAL_TAB=first; printf first > "+quote(first));wait_file(first,'first')
                 shortcut(hwnd,0x11,0x54);time.sleep(1)
-                command(hwnd,"printf '%s' \"${GIT_TERMINAL_TAB-independent}\" > "+quote(second));wait_for(second.exists)
+                command(hwnd,"printf '%s' \"${GIT_TERMINAL_TAB-independent}\" > "+quote(second));wait_file(second,'independent')
                 assert second.read_text().strip()=='independent'
                 shortcut(hwnd,0x11,0x09);time.sleep(.15)
                 shortcut(hwnd,0x11,0x10,0x09);time.sleep(.15)
                 shortcut(hwnd,0x11,0x57);time.sleep(.3)
-                command(hwnd,"printf '%s' \"$GIT_TERMINAL_TAB\" > "+quote(returned));wait_for(returned.exists);assert returned.read_text().strip()=='first'
+                command(hwnd,"printf '%s' \"$GIT_TERMINAL_TAB\" > "+quote(returned));wait_file(returned,'first')
             record('native-keyboard-tabs-independent-shells-and-close',tabs)
             def resize():
                 before=root/'width-before.txt';after=root/'width-after.txt'
-                command(hwnd,"stty size > "+quote(before));wait_for(before.exists)
+                command(hwnd,"stty size > "+quote(before));wait_file(before)
                 u.SetWindowPos(hwnd,None,40,40,920,650,4);time.sleep(.5)
-                command(hwnd,"stty size > "+quote(after));wait_for(after.exists)
+                command(hwnd,"stty size > "+quote(after));wait_file(after)
                 assert int(before.read_text().split()[1])!=int(after.read_text().split()[1])
             record('native-window-resize-reaches-conpty',resize)
             def rendering():
                 ready=root/'render.txt';command(hwnd,"printf '\\033[2J\\033[HGit-Terminal 中文 / UTF-8\\nCOPY_MARKER_GIT_TERMINAL\\n'; printf ready > "+quote(ready))
-                wait_for(ready.exists);time.sleep(.4)
+                wait_file(ready,'ready');time.sleep(.4)
                 image=ImageGrab.grab(bbox=bounds(hwnd));assert len(image.getcolors(image.width*image.height) or [])>20
                 image.save(output.with_suffix('.png'))
             record('actual-gpui-gpu-window-chinese-and-color-screenshot',rendering)
@@ -286,7 +314,7 @@ def main():
                 assert copied
             record('native-mouse-selection-and-copy',selection)
             def history():
-                ready=root/'history.txt';command(hwnd,"printf 'history-%s\\n' {1..180}; printf ready > "+quote(ready));wait_for(ready.exists);time.sleep(.3)
+                ready=root/'history.txt';command(hwnd,"printf 'history-%s\\n' {1..180}; printf ready > "+quote(ready));wait_file(ready,'ready');time.sleep(.3)
                 image=ImageGrab.grab(bbox=bounds(hwnd));region=(5,100,min(360,image.width),image.height-45)
                 before=hashlib.sha256(image.crop(region).tobytes()).hexdigest()
                 shortcut(hwnd,0x10,0x21);time.sleep(.25)
@@ -302,8 +330,7 @@ def main():
                 time.sleep(.5)
                 type_text(hwnd,'git log --oneline --all "中文路径"')
                 time.sleep(.5)
-                image=ImageGrab.grab(bbox=bounds(hwnd))
-                image.save(output.with_name(output.stem+'-tabs-highlight.png'))
+                screenshot(hwnd,output.with_name(output.stem+'-tabs-highlight.png'),frame=True)
                 shortcut(hwnd,0x11,0x55)
                 shortcut(hwnd,0x11,0x57)
             record('tab-first-design-default-bash-live-command-highlighting',tab_design)
@@ -366,7 +393,8 @@ def main():
                 if p.poll() is None:subprocess.run([os.path.join(os.environ['SystemRoot'],'System32/taskkill.exe'),'/PID',str(p.pid),'/T','/F'],capture_output=True,timeout=10)
         record('bounded-output-drain-and-command-exit-without-ui-deadlock',burst_exit)
 
-    value=dict(status='pass' if all(item['status']=='pass' for item in results) else 'fail',platform='windows-x64',renderer='gpui-fast',binary_sha256=hashlib.file_digest(binary.open('rb'),'sha256').hexdigest(),seconds=round(time.monotonic()-start,3),personal_profile_accessed=False,terminal_contents_logged=False,results=results)
+    u.DestroyWindow(clipboard_window);ole.OleUninitialize()
+    value=dict(status='pass' if all(item['status']=='pass' for item in results) else 'fail',platform='windows-x64',renderer='gpui-fast',input_delivery='owned HWND WM_CHAR UTF-16 commits; SendInput keyboard shortcuts',binary_sha256=hashlib.file_digest(binary.open('rb'),'sha256').hexdigest(),seconds=round(time.monotonic()-start,3),personal_profile_accessed=False,terminal_contents_logged=False,results=results)
     output.write_text(json.dumps(value,indent=2)+'\n',encoding='utf-8');print(json.dumps(value))
     raise SystemExit(value['status']!='pass')
 

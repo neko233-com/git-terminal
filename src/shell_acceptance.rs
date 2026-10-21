@@ -119,10 +119,12 @@ fn shell_features_real_pty() {
                 received: &mut Vec<u8>,
                 needle: &str| {
         let deadline = Instant::now() + Duration::from_secs(20);
+        let mut last_output = Instant::now();
         while Instant::now() < deadline {
             if let Ok(bytes) = bytes_rx.recv_timeout(Duration::from_millis(30)) {
                 terminal.process_bytes(&bytes);
                 received.extend_from_slice(&bytes);
+                last_output = Instant::now();
             }
             while let Ok(event) = events_rx.try_recv() {
                 let TerminalEvent::Response(event) = event else {
@@ -146,7 +148,7 @@ fn shell_features_real_pty() {
                 writer.write_all(reply.as_bytes()).unwrap();
                 writer.flush().unwrap();
             }
-            if received
+            let found = received
                 .windows(needle.len())
                 .any(|b| b == needle.as_bytes())
                 || terminal.with_term(|term| {
@@ -164,8 +166,8 @@ fn shell_features_real_pty() {
                         })
                         .collect();
                     screen.contains(needle)
-                })
-            {
+                });
+            if found && (needle != "❯" || last_output.elapsed() > Duration::from_millis(500)) {
                 return;
             }
         }
@@ -177,11 +179,11 @@ fn shell_features_real_pty() {
                 .contains(alacritty_terminal::term::TermMode::BRACKETED_PASTE)
         );
     };
-    pump(&mut terminal, &mut writer, &mut received, "\x1b[?2004h");
-    writer.write_all(b"builtin printf '\\107\\124_READY:%s:%s\\n' \"$BLE_VERSION\" \"$__git_terminal_branch\"\r").unwrap();
+    pump(&mut terminal, &mut writer, &mut received, "❯");
+    writer.write_all(b"builtin printf '\\107\\124_READY:%s:%s\\n' \"$BASH_VERSION\" \"$__git_terminal_branch\"\r").unwrap();
     writer.flush().unwrap();
     received.clear();
-    pump(&mut terminal, &mut writer, &mut received, "GT_READY:0.4");
+    pump(&mut terminal, &mut writer, &mut received, "GT_READY:");
     assert!(
         received
             .windows(b"[feature/first]".len())
@@ -209,7 +211,14 @@ fn shell_features_real_pty() {
                     .position(|v| v.iter().copied().eq(needle.chars()))
             };
             if let (Some(command), Some(string)) = (find("printf"), find("'highlight-token'")) {
-                cells[command].fg != cells[string].fg
+                let colors = gpui_terminal::highlight::input_colors(term);
+                let at = |column| {
+                    colors
+                        .iter()
+                        .find(|(point, _)| *point == Point::new(line, Column(column)))
+                        .map(|(_, color)| *color)
+                };
+                at(command).is_some() && at(command) != at(string)
             } else {
                 false
             }

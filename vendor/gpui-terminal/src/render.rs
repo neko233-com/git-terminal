@@ -166,6 +166,8 @@ impl BackgroundRect {
 /// - Background and text batching minimize GPU draw calls
 #[derive(Clone)]
 pub struct TerminalRenderer {
+    /// Enable native input coloring only while the managed prompt is active.
+    pub syntax_highlighting: bool,
     /// Font family name (e.g., "Fira Code", "Menlo")
     pub font_family: String,
 
@@ -220,6 +222,7 @@ impl TerminalRenderer {
         let cell_height = font_size * 1.4; // Line height with some spacing
 
         Self {
+            syntax_highlighting: false,
             font_family,
             font_size,
             cell_width,
@@ -458,6 +461,14 @@ impl TerminalRenderer {
         let num_lines = grid.screen_lines();
         let num_cols = grid.columns();
         let colors = term.colors();
+        let input_colors: std::collections::HashMap<_, _> = if self.syntax_highlighting {
+            crate::highlight::input_colors(term)
+                .into_iter()
+                .map(|(point, color)| ((point.line.0, point.column.0), color))
+                .collect()
+        } else {
+            Default::default()
+        };
 
         // Calculate default background color
         let default_bg = self.palette.resolve(
@@ -491,6 +502,9 @@ impl TerminalRenderer {
                     let col = Column(col_idx);
                     let point = AlacPoint::new(line, col);
                     let mut cell = grid[point].clone();
+                    if let Some(color) = input_colors.get(&(point.line.0, point.column.0)) {
+                        cell.fg = Color::Spec(*color);
+                    }
                     if term
                         .selection
                         .as_ref()
