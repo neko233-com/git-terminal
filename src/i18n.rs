@@ -263,17 +263,27 @@ pub(crate) fn resolve(selection: &str) -> Option<Language> {
     if let Some(code) = legacy_alias(trimmed) {
         return find(code).map(to_language);
     }
-    find(trimmed).map(to_language)
+    // A full locale name is resolved the same way a device locale is, so a user
+    // who names the locale of their system does not have to know which code this
+    // build ships: `zh-TW` selects the traditional document and `ja-JP` Japanese.
+    match_locale(trimmed)
 }
 
 /// The canonical name a selection is stored under.
+///
+/// The stored value is the code of the document that was actually chosen, not the
+/// name the user typed, so a later release can read it back without guessing which
+/// document a regional name was resolved to.
 pub(crate) fn canonical(selection: &str) -> String {
     let trimmed = selection.trim();
     if matches!(trimmed.to_ascii_lowercase().as_str(), "auto" | "system") {
         return "auto".to_owned();
     }
-    match legacy_alias(trimmed) {
-        Some(code) => code.to_owned(),
+    if let Some(code) = legacy_alias(trimmed) {
+        return code.to_owned();
+    }
+    match resolve(trimmed) {
+        Some(language) => language.code().to_owned(),
         None => normalize_code(trimmed),
     }
 }
