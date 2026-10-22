@@ -23,6 +23,8 @@ pub struct Host {
     pub identity: String,
     pub config: String,
     pub monitor_interval: u64,
+    #[serde(skip)]
+    pub system: bool,
 }
 
 impl Default for Host {
@@ -36,6 +38,7 @@ impl Default for Host {
             identity: String::new(),
             config: String::new(),
             monitor_interval: 2,
+            system: false,
         }
     }
 }
@@ -104,7 +107,7 @@ pub fn config_path() -> PathBuf {
         .join("git-terminal/hosts.json")
 }
 
-pub fn load_hosts() -> Result<Vec<Host>> {
+pub fn load_managed_hosts() -> Result<Vec<Host>> {
     let path = config_path();
     if !path.exists() {
         return Ok(Vec::new());
@@ -120,7 +123,7 @@ pub fn load_hosts() -> Result<Vec<Host>> {
     Ok(hosts)
 }
 
-pub fn save_hosts(hosts: &[Host]) -> Result<()> {
+pub fn write_hosts(hosts: &[Host]) -> Result<()> {
     for host in hosts {
         host.validate()?;
     }
@@ -165,6 +168,9 @@ pub fn save_hosts(hosts: &[Host]) -> Result<()> {
     std::fs::rename(temp, path)?;
     Ok(())
 }
+
+pub fn load_hosts() -> Result<Vec<Host>> { crate::host_config::load() }
+pub fn save_hosts(hosts: &[Host]) -> Result<()> { crate::host_config::save(hosts) }
 
 pub fn ssh_executable(git: Option<&Path>) -> Result<PathBuf> {
     #[cfg(windows)]

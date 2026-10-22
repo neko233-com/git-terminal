@@ -160,6 +160,12 @@ def wait_file(path,expected=None):
     return path.read_text(encoding='utf-8')
 
 
+def button(flags):
+    """Press or release the left mouse button through the real input queue."""
+    value=Input(0,Payload(mouse=Mouse(0,0,0,flags,0,0)))
+    assert u.SendInput(1,c.byref(value),c.sizeof(Input))==1, 'Owned window mouse input was refused'
+
+
 def bounds(hwnd):
     rect=w.RECT();point=w.POINT()
     assert u.GetClientRect(hwnd,c.byref(rect)) and u.ClientToScreen(hwnd,c.byref(point))
@@ -324,6 +330,38 @@ def main():
                 screenshot(hwnd,output.with_name(output.stem+'-compact.png'),frame=True)
                 u.SetWindowPos(hwnd,None,40,40,1120,720,4);activate_owned(hwnd);time.sleep(.3)
             record('embedded-icon-native-caption-hit-areas-and-compact-window',native_chrome)
+            def drag_resize():
+                # Dragging a window border must resize the window. A borderless window has
+                # no system resize frame, so this exercises the application's own hit-test
+                # and gesture handling rather than the native Windows resize loop.
+                def client_box():
+                    rect=w.RECT();point=w.POINT()
+                    assert u.GetClientRect(hwnd,c.byref(rect)) and u.ClientToScreen(hwnd,c.byref(point))
+                    return point.x,point.y,rect.right-rect.left,rect.bottom-rect.top
+                def window_size():
+                    rect=w.RECT();assert u.GetWindowRect(hwnd,c.byref(rect))
+                    return rect.right-rect.left,rect.bottom-rect.top
+                def drag_to(x,y,dx,dy):
+                    u.SetCursorPos(x,y);time.sleep(.15)
+                    button(0x0002)
+                    time.sleep(.15)
+                    for step in range(1,9):
+                        u.SetCursorPos(int(x+dx*step/8),int(y+dy*step/8));time.sleep(.04)
+                    button(0x0004);time.sleep(.35)
+                def hit(x,y):
+                    return u.SendMessageW(hwnd,0x84,0,(y&0xffff)<<16|(x&0xffff))
+                u.SetWindowPos(hwnd,None,40,40,1120,720,4);time.sleep(.4)
+                for name,expected,dx,dy in (('right',11,-90,0),('bottom',15,0,-70),('left',10,90,0),('top',12,0,70)):
+                    x0,y0,cw,ch=client_box()
+                    if name=='right':x,y=x0+cw-1,y0+ch//2
+                    elif name=='left':x,y=x0,y0+ch//2
+                    elif name=='top':x,y=x0+cw//2,y0
+                    else:x,y=x0+cw//2,y0+ch-1
+                    assert hit(x,y)==expected, f'The {name} border is not a resize handle'
+                    before=window_size();drag_to(x,y,dx,dy);after=window_size()
+                    assert before!=after, f'Dragging the {name} border did not resize the window'
+                    u.SetWindowPos(hwnd,None,40,40,1120,720,4);time.sleep(.4)
+            record('border-drag-resizes-window-on-all-four-edges',drag_resize)
             def rendering():
                 ready=root/'render.txt';command(hwnd,"printf '\\033[2J\\033[HGit-Terminal 中文 / UTF-8\\nCOPY_MARKER_GIT_TERMINAL\\n'; printf ready > "+quote(ready))
                 wait_file(ready,'ready');time.sleep(.4)

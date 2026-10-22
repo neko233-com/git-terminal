@@ -4,12 +4,15 @@ mod assets;
 #[cfg(windows)]
 mod conpty_input;
 mod field;
+mod host_config;
+mod i18n;
 mod monitor;
 mod presentation;
 mod remote;
 mod remote_cli;
 mod remote_ui;
 mod session;
+mod session_task;
 mod settings;
 mod sftp;
 #[cfg(all(test, windows))]
@@ -75,15 +78,17 @@ enum Action {
 enum LanguageAction {
     Get,
     Set {
-        #[arg(value_parser=["auto","chinese","english"])]
+        /// The language to use: a locale code, or `auto` to follow the device.
         language: String,
     },
+    /// List the languages that ship with this build.
+    List,
 }
 
 struct Tab {
     id: u64,
     context: TabContext,
-    _session: Session,
+    _session: session_task::SessionTask,
     terminal: Entity<TerminalView>,
     remote: Option<remote::Host>,
 }
@@ -168,24 +173,18 @@ impl Desktop {
         {
             setup.cwd = tab.context.cwd.clone();
         }
-        let result = if let Some(host) = &remote {
-            remote::ssh_executable(setup.git.as_deref())
-                .and_then(|ssh| remote::terminal_command(host, &ssh, &setup.cwd))
-                .and_then(Session::from_command)
-        } else {
-            Session::spawn(&setup, command.as_deref())
-        };
-        let (session, writer, reader) = match result {
-            Ok(v) => v,
-            Err(e) => {
-                if command.is_some() {
-                    self.command_exit.store(1, Ordering::Release);
-                }
-                self.error = Some(e.to_string());
-                cx.notify();
-                return;
+        let launch_setup = setup.clone();
+        let launch_remote = remote.clone();
+        let launch_command = command.clone();
+        let (session, writer, reader) = session_task::SessionTask::start(move || {
+            if let Some(host) = &launch_remote {
+                remote::ssh_executable(launch_setup.git.as_deref())
+                    .and_then(|ssh| remote::terminal_command(host, &ssh, &launch_setup.cwd))
+                    .and_then(Session::from_command)
+            } else {
+                Session::spawn(&launch_setup, launch_command.as_deref())
             }
-        };
+        });
         let id = self.next_id;
         self.next_id += 1;
         let resize = session.resize.clone();
@@ -417,7 +416,7 @@ impl Desktop {
 
 impl Render for Desktop {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let chinese = self.settings.chinese();
+        let language = self.settings.active_language();
         let show_hosts = self.remote.visible
             && (!self.remote.right || window.viewport_size().width >= px(1050.));
         let host_editor = self.render_host_editor(cx);
@@ -456,7 +455,9 @@ impl Render for Desktop {
                         app.focus(window, cx);
                         cx.notify();
                     }))
-                    .child(div().text_color(rgb(0x7cb7ff)).child("›_"))
+                    .child(div().text_color(rgb(0x7cb7ff)).child(
+                        if tab._session.starting.load(Ordering::Acquire) { "·" } else { "›_" }
+                    ))
                     .child(
                         div()
                             .flex_1()
@@ -574,11 +575,10 @@ impl Render for Desktop {
                             .py_2()
                             .text_color(rgb(0x8c9ab0))
                             .text_size(px(12.))
-                            .child(if chinese {
-                                "新建标签并设为默认"
-                            } else {
-                                "Open tab and set default"
-                            }),
+                            .child(crate::i18n::translate(
+                                &language,
+                                "Open tab and set default",
+                            )),
                     )
                     .child(profiles)
                     .child(div().h(px(1.)).my_2().bg(rgb(0x354157)))
@@ -590,19 +590,28 @@ impl Render for Desktop {
                             .rounded_md()
                             .cursor_pointer()
                             .hover(|s| s.bg(rgb(0x2b3545)))
-                            .child(if chinese {
-                                "界面语言　中文 / English"
-                            } else {
-                                "Language　English / 中文"
-                            })
+                            .child(format!(
+                                "{}　{}",
+                                crate::i18n::translate(&language, "Language"),
+                                // The active language is named in its own
+                                // language, so the entry stays readable no
+                                // matter which language the menu is shown in.
+                                language.name()
+                            ))
                             .on_click(cx.listener(|app, _, window, cx| {
-                                app.settings.language = if app.settings.chinese() {
-                                    "english"
-                                } else {
-                                    "chinese"
+                                // The menu cycles through the shipped languages.
+                                // The list comes from the locale documents, so
+                                // it grows by itself when a language is added.
+                                let available = crate::i18n::available();
+                                let current = app.settings.active_language().code().to_owned();
+                                let next = available
+                                    .iter()
+                                    .find(|entry| entry.code() != current)
+                                    .map(|entry| entry.code().to_owned());
+                                if let Some(next) = next {
+                                    app.settings.language = next;
+                                    let _ = app.settings.save();
                                 }
-                                .into();
-                                let _ = app.settings.save();
                                 app.profile_menu = false;
                                 app.focus(window, cx);
                                 cx.notify();
@@ -697,7 +706,7 @@ impl Render for Desktop {
                                     .rounded_md()
                                     .cursor_pointer()
                                     .text_color(rgb(0x85cbcf))
-                                    .child(if chinese { "重连" } else { "Reconnect" })
+                                    .child(crate::i18n::translate(&language, "Reconnect"))
                                     .on_click(cx.listener(move |app, _, window, cx| {
                                         app.open_ssh(host.clone(), window, cx);
                                         app.close(id, window, cx);
@@ -744,7 +753,9 @@ impl Render for Desktop {
                         div()
                             .id("window-drag")
                             .w(px(32.))
+                            .min_w(px(32.))
                             .h_full()
+                            .flex_1()
                             .flex_shrink_0()
                             .window_control_area(WindowControlArea::Drag),
                     )
@@ -817,11 +828,10 @@ impl Render for Desktop {
                             .text_ellipsis()
                             .child(directory),
                     )
-                    .child(div().flex_shrink_0().child(if chinese {
-                        "新建 Ctrl+T    关闭 Ctrl+W"
-                    } else {
-                        "New Ctrl+T    Close Ctrl+W"
-                    }))
+                    .child(div().flex_shrink_0().child(crate::i18n::translate(
+                        &language,
+                        "New Ctrl+T    Close Ctrl+W",
+                    )))
                     .child(div().flex_shrink_0().child(profile)),
             )
             .children(menu)
@@ -854,14 +864,53 @@ fn run() -> Result<u32> {
         return Ok(0);
     }
     if let Some(Action::Language { action }) = &options.action {
-        if let LanguageAction::Set { language } = action {
-            settings.language = language.clone();
-            settings.save()?;
+        match action {
+            LanguageAction::Get => {
+                let language = settings.active_language();
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "product":"git-terminal",
+                        "configured":settings.language,
+                        "language":language.code(),
+                        "name":language.name(),
+                        "english_name":language.english_name(),
+                        "supported":crate::i18n::available()
+                            .iter()
+                            .map(|entry| entry.code().to_owned())
+                            .collect::<Vec<_>>(),
+                    })
+                );
+            }
+            LanguageAction::Set { language } => {
+                // The name is validated before it is stored, so a typo cannot
+                // leave the configuration pointing at a language that does not
+                // exist.
+                let resolved = crate::i18n::resolve(language).ok_or_else(|| {
+                    anyhow::anyhow!("unsupported language; use one of the listed languages or auto")
+                })?;
+                settings.language = crate::i18n::canonical(language);
+                settings.save()?;
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "product":"git-terminal",
+                        "configured":settings.language,
+                        "language":resolved.code(),
+                        "name":resolved.name(),
+                    })
+                );
+            }
+            LanguageAction::List => {
+                for entry in crate::i18n::available() {
+                    println!("{}\t{}\t{}", entry.code(), entry.name(), entry.english_name());
+                }
+                println!("auto\t{}", crate::i18n::translate(
+                    &settings.active_language(),
+                    "Follow the device language"
+                ));
+            }
         }
-        println!(
-            "{}",
-            serde_json::json!({"product":"git-terminal","configured":settings.language,"language":if settings.chinese(){"chinese"}else{"english"}})
-        );
         return Ok(0);
     }
     let cwd = if options.cd_to_home {

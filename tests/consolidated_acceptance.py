@@ -62,6 +62,15 @@ def main():
         for name, script in [('responsiveness', 'windows_responsiveness.py'), ('desktop-regression', 'windows_desktop_acceptance.py')]:
             output = args.output.with_name(args.output.stem + '-' + name + '.json')
             reports.append(process(name, [sys.executable, ROOT / 'tests' / script, '--binary', args.binary, '--git', args.git, '--output', output], output))
+        # The borderless window has no native resize frame, so the resize behaviour is
+        # measured directly: the probe drags each edge and corner with the real mouse and
+        # checks that the window geometry actually changed.
+        resize_output = args.output.with_name(args.output.stem + '-resize.json')
+        reports.append(process('window-resize-drag', [sys.executable, ROOT / 'tests' / 'resize_edge_probe.py',
+                                                      '--binary', args.binary, '--git', args.git, '--output', resize_output], resize_output))
+        surface_output = args.output.with_name(args.output.stem + '-resize-surface.json')
+        reports.append(process('window-resize-surface', [sys.executable, ROOT / 'tests' / 'resize_surface_map.py',
+                                                         '--binary', args.binary, '--git', args.git, '--output', surface_output], surface_output))
         result = run_desktop(fixture, args.git, args.drop_helper.resolve(strict=True), args.output.with_name(args.output.stem + '-ssh-ui.json'))
         report = dict(status='pass' if all(r['status'] == 'pass' for r in result) else 'fail', results=result)
         args.output.with_name(args.output.stem + '-ssh-ui.json').write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8', newline='\n')

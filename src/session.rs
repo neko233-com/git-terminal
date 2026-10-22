@@ -75,10 +75,12 @@ impl Setup {
         let program_files = std::env::var_os("ProgramW6432")
             .or_else(|| std::env::var_os("ProgramFiles"))
             .unwrap_or_else(|| "C:\\Program Files".into());
-        let installed = PathBuf::from(program_files)
+        let standard = PathBuf::from(&program_files).join("Git/bin/git.exe");
+        let legacy = PathBuf::from(program_files)
             .join("git-next")
             .join(platform)
             .join("bin/git.exe");
+        let installed = if standard.is_file() { standard } else { legacy };
         let candidate = explicit_git
             .map(Path::to_path_buf)
             .or_else(|| std::env::var_os("GIT_NEXT_EXECUTABLE").map(PathBuf::from))
@@ -316,7 +318,7 @@ impl Setup {
     }
 }
 
-type SessionIo = (Session, Box<dyn Write + Send>, Box<dyn Read + Send>);
+pub(crate) type SessionIo = (Session, Box<dyn Write + Send>, Box<dyn Read + Send>);
 
 pub struct Session {
     pub _master: Arc<parking_lot::Mutex<Option<Box<dyn MasterPty + Send>>>>,

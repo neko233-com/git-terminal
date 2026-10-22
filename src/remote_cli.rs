@@ -87,6 +87,7 @@ pub fn run(action: &RemoteAction, git: Option<&Path>) -> Result<()> {
                 identity: identity.clone(),
                 config: config.clone(),
                 monitor_interval: 2,
+                system: false,
             };
             let mut hosts = remote::load_hosts()?;
             ensure!(

@@ -167,8 +167,13 @@ impl Drop for Workspace {
     }
 }
 
-fn label(zh: bool, chinese: &'static str, english: &'static str) -> &'static str {
-    if zh { chinese } else { english }
+/// Translate an interface message with the active language.
+///
+/// The locale documents live for the whole process, so the translated message
+/// is available for as long as the caller needs it; the English fallback is
+/// the source text of the caller.
+fn tr<'a>(language: &crate::i18n::Language, english: &'a str) -> &'a str {
+    crate::i18n::translate(language, english)
 }
 fn button(id: impl Into<ElementId>, text: impl Into<SharedString>) -> Stateful<Div> {
     div()
@@ -538,6 +543,7 @@ impl Desktop {
             identity: values[5].clone(),
             config: values[6].clone(),
             monitor_interval: self.remote.interval,
+            system: false,
         };
         let mut hosts = self.remote.hosts.clone();
         if hosts
@@ -597,7 +603,7 @@ impl Desktop {
         .detach();
     }
     pub fn render_remote_sidebar(&mut self, cx: &mut Context<Self>) -> Stateful<Div> {
-        let zh = self.settings.chinese();
+        let language = self.settings.active_language();
         let mut rows = div().flex().flex_col().gap_1();
         let mut groups: Vec<_> = self.remote.hosts.iter().map(|h| h.group.clone()).collect();
         groups.sort();
@@ -657,7 +663,7 @@ impl Desktop {
                                 .flex()
                                 .gap_1()
                                 .child(
-                                    button(("connect", index), label(zh, "连接", "Connect"))
+                                    button(("connect", index), tr(&language, "Connect"))
                                         .on_click(cx.listener(move |app, _, window, cx| {
                                             cx.stop_propagation();
                                             let host = app.remote.hosts[index].clone();
@@ -665,7 +671,7 @@ impl Desktop {
                                         })),
                                 )
                                 .child(
-                                    button(("edit-host", index), label(zh, "编辑", "Edit"))
+                                    button(("edit-host", index), tr(&language, "Edit"))
                                         .on_click(cx.listener(move |app, _, window, cx| {
                                             cx.stop_propagation();
                                             app.edit_host(Some(index), window, cx);
@@ -676,14 +682,14 @@ impl Desktop {
             }
         }
         div().id("ssh-hosts").w(px(216.)).min_w(px(176.)).h_full().flex_shrink_0().flex().flex_col().bg(rgb(0x171c26)).border_r_1().border_color(rgb(0x252e3f))
-            .child(div().p_3().flex().items_center().justify_between().child(label(zh, "SSH 主机", "SSH hosts"))
+            .child(div().p_3().flex().items_center().justify_between().child(tr(&language, "SSH hosts"))
                 .child(button("add-host", "+").on_click(cx.listener(|app, _, window, cx| app.edit_host(None, window, cx)))))
             .child(div().id("host-scroll").flex_1().min_h_0().overflow_y_scroll().px_2().child(rows)
-                .children(self.remote.hosts.is_empty().then(|| div().p_2().text_color(rgb(0x8c9ab0)).child(label(zh, "添加主机，或导入 SSH config。支持密钥、Agent 和跳板机。", "Add a host or import SSH config. Keys, agents and jump hosts are supported.")))))
-            .child(button("import-hosts", label(zh, "导入 SSH config", "Import SSH config")).m_2().on_click(cx.listener(|app, _, _, cx| app.import_hosts(cx))))
+                .children(self.remote.hosts.is_empty().then(|| div().p_2().text_color(rgb(0x8c9ab0)).child(tr(&language, "Add a host or import SSH config. Keys, agents and jump hosts are supported.")))))
+            .child(button("import-hosts", tr(&language, "Import SSH config")).m_2().on_click(cx.listener(|app, _, _, cx| app.import_hosts(cx))))
     }
     pub fn render_remote_panel(&mut self, cx: &mut Context<Self>) -> Stateful<Div> {
-        let zh = self.settings.chinese();
+        let language = self.settings.active_language();
         let host = self.remote.host();
         let accepts_files = host.is_some() && !self.remote.monitoring;
         let title = host
@@ -698,7 +704,7 @@ impl Desktop {
                         .flex()
                         .items_center()
                         .justify_between()
-                        .child(label(zh, "只读 · 无需代理", "Read only · no agent"))
+                        .child(tr(&language, "Read only · no agent"))
                         .child(
                             button("interval", format!("{}s", self.remote.interval)).on_click(
                                 cx.listener(|app, _, _, cx| {
@@ -722,9 +728,9 @@ impl Desktop {
                     button(
                         "pause-monitor",
                         if self.remote.monitor_cancel.is_some() {
-                            label(zh, "暂停监控", "Pause monitoring")
+                            tr(&language, "Pause monitoring")
                         } else {
-                            label(zh, "恢复监控", "Resume monitoring")
+                            tr(&language, "Resume monitoring")
                         },
                     )
                     .on_click(cx.listener(|app, _, _, cx| {
@@ -834,7 +840,7 @@ impl Desktop {
                         format!(
                             "{} {} {}",
                             sample.cpus.len().saturating_sub(1),
-                            label(zh, "核", "cores"),
+                            tr(&language, "cores"),
                             if self.remote.show_all_cores {
                                 "⌃"
                             } else {
@@ -853,7 +859,7 @@ impl Desktop {
                             .border_t_1()
                             .border_color(rgb(0x2b3545))
                             .pt_3()
-                            .child(label(zh, "内存", "Memory")),
+                            .child(tr(&language, "Memory")),
                     )
                     .child(meter(
                         sample.memory_used as f64 / sample.memory_total.max(1) as f64,
@@ -870,7 +876,7 @@ impl Desktop {
                             .text_size(px(11.))
                             .child(format!(
                                 "{} {}",
-                                label(zh, "缓存", "Cache"),
+                                tr(&language, "Cache"),
                                 bytes(sample.memory_cache as f64)
                             )),
                     )
@@ -879,7 +885,7 @@ impl Desktop {
                             .border_t_1()
                             .border_color(rgb(0x2b3545))
                             .pt_3()
-                            .child(label(zh, "网络", "Network")),
+                            .child(tr(&language, "Network")),
                     )
                     .child(format!(
                         "↓ {} /s",
@@ -910,7 +916,7 @@ impl Desktop {
                             .border_t_1()
                             .border_color(rgb(0x2b3545))
                             .pt_3()
-                            .child(label(zh, "磁盘", "Disk")),
+                            .child(tr(&language, "Disk")),
                     );
                 for disk in sample.disks.iter().take(16) {
                     content = content.child(div().text_size(px(11.)).child(format!(
@@ -945,7 +951,7 @@ impl Desktop {
                     );
                 }
             } else {
-                content = content.child(label(zh, "连接并采样中…", "Connecting and sampling…"));
+                content = content.child(tr(&language, "Connecting and sampling…"));
             }
         } else {
             content = content
@@ -971,7 +977,7 @@ impl Desktop {
                             |app, _, _, cx| app.list_remote(app.remote.directory.clone(), cx),
                         )))
                         .child(
-                            button("upload", label(zh, "上传…", "Upload…"))
+                            button("upload", tr(&language, "Upload…"))
                                 .on_click(cx.listener(|app, _, _, cx| app.pick_upload(cx))),
                         ),
                 )
@@ -987,14 +993,10 @@ impl Desktop {
                     div()
                         .text_color(rgb(0x8c9ab0))
                         .text_size(px(11.))
-                        .child(label(
-                            zh,
-                            "拖入文件上传 · 右键下载",
-                            "Drop to upload · right click to download",
-                        )),
+                        .child(tr(&language, "Drop to upload · right click to download")),
                 );
             if self.remote.busy {
-                content = content.child(label(zh, "读取目录中…", "Reading directory…"));
+                content = content.child(tr(&language, "Reading directory…"));
             }
             content = content.child(
                 uniform_list(
@@ -1071,10 +1073,10 @@ impl Desktop {
         for transfer in transfers {
             let id = transfer.id;
             let state = match transfer.state.as_str() {
-                "queued" => label(zh, "排队", "Queued"),
-                "running" => label(zh, "传输中", "Running"),
-                "done" => label(zh, "完成", "Done"),
-                "cancelled" => label(zh, "已取消", "Cancelled"),
+                "queued" => tr(&language, "Queued"),
+                "running" => tr(&language, "Running"),
+                "done" => tr(&language, "Done"),
+                "cancelled" => tr(&language, "Cancelled"),
                 other => other,
             };
             queue = queue.child(
@@ -1134,7 +1136,7 @@ impl Desktop {
                         .child(entry.name.clone()),
                 )
                 .child(
-                    button("download-entry", label(zh, "下载…", "Download…")).on_click(
+                    button("download-entry", tr(&language, "Download…")).on_click(
                         cx.listener(move |app, _, _, cx| app.download_entry(entry.clone(), cx)),
                     ),
                 )
@@ -1180,7 +1182,7 @@ impl Desktop {
                     .gap_2()
                     .px_2()
                     .child(
-                        button("files-mode", label(zh, "文件", "Files")).on_click(cx.listener(
+                        button("files-mode", tr(&language, "Files")).on_click(cx.listener(
                             |app, _, _, cx| {
                                 app.remote.stop_monitor();
                                 app.remote.monitoring = false;
@@ -1189,7 +1191,7 @@ impl Desktop {
                         )),
                     )
                     .child(
-                        button("monitor-mode", label(zh, "监控", "Monitor"))
+                        button("monitor-mode", tr(&language, "Monitor"))
                             .on_click(cx.listener(|app, _, _, cx| app.start_monitor(cx))),
                     ),
             )
@@ -1221,28 +1223,18 @@ impl Desktop {
     }
     pub fn render_host_editor(&self, cx: &mut Context<Self>) -> Option<Div> {
         let editor = self.remote.editor.as_ref()?;
-        let zh = self.settings.chinese();
-        let labels = if zh {
-            [
-                "名称",
-                "分组",
-                "主机 / SSH 别名",
-                "用户名（可选）",
-                "端口（留空使用 SSH config）",
-                "私钥文件（可选）",
-                "SSH config 文件（可选）",
-            ]
-        } else {
-            [
-                "Name",
-                "Group",
-                "Host / SSH alias",
-                "User (optional)",
-                "Port (blank: SSH config)",
-                "Identity file (optional)",
-                "SSH config file (optional)",
-            ]
-        };
+        let language = self.settings.active_language();
+        // The field labels are looked up one by one, so the list grows with the
+        // language documents instead of being written out twice.
+        let labels = [
+            tr(&language, "Name"),
+            tr(&language, "Group"),
+            tr(&language, "Host / SSH alias"),
+            tr(&language, "User (optional)"),
+            tr(&language, "Port (blank: SSH config)"),
+            tr(&language, "Identity file (optional)"),
+            tr(&language, "SSH config file (optional)"),
+        ];
         let mut fields = div().flex().flex_col().gap_2();
         for (label, field) in labels.into_iter().zip(&editor.fields) {
             fields = fields.child(
@@ -1262,15 +1254,15 @@ impl Desktop {
         let index = editor.index;
         Some(div().absolute().inset_0().flex().items_center().justify_center().bg(rgba(0x00000099)).occlude()
             .child(div().w(px(460.)).max_w(relative(0.95)).p_5().rounded_lg().bg(rgb(0x171c26)).border_1().border_color(rgb(0x354157)).flex().flex_col().gap_3()
-                .child(div().text_size(px(18.)).child(label(zh, "SSH 主机", "SSH host"))).child(fields)
-                .child(div().text_size(px(11.)).text_color(rgb(0x8c9ab0)).child(label(zh, "支持 OpenSSH Agent、ProxyJump 和 known_hosts。密码在原生登录窗口输入，不写入此配置。", "Uses OpenSSH agents, ProxyJump and known_hosts. Passwords are entered in a native authentication dialog and are never saved here.")))
+                .child(div().text_size(px(18.)).child(tr(&language, "SSH host"))).child(fields)
+                .child(div().text_size(px(11.)).text_color(rgb(0x8c9ab0)).child(tr(&language, "Uses OpenSSH agents, ProxyJump and known_hosts. Passwords are entered in a native authentication dialog and are never saved here.")))
                 .children(self.remote.error.clone().map(|error| div().text_color(rgb(0xf08691)).child(error)))
                 .child(div().flex().justify_between().gap_2()
-                    .children(index.map(|index| button("delete-host", label(zh, "删除主机", "Delete host")).text_color(rgb(0xf08691)).on_click(cx.listener(move |app, _, _, cx| {
+                    .children(index.map(|index| button("delete-host", tr(&language, "Delete host")).text_color(rgb(0xf08691)).on_click(cx.listener(move |app, _, _, cx| {
                         let mut hosts = app.remote.hosts.clone(); hosts.remove(index);
                         match remote::save_hosts(&hosts) { Ok(()) => { app.remote.stop_monitor(); app.remote.stop_listing(); app.remote.hosts = hosts; app.remote.selected = None; app.remote.right = false; app.remote.editor = None; }, Err(error) => app.remote.error = Some(error.to_string()) } cx.notify();
                     }))))
-                    .child(div().flex().gap_2().child(button("cancel-host", label(zh, "取消", "Cancel")).on_click(cx.listener(|app, _, window, cx| { app.remote.editor = None; app.focus(window, cx); cx.notify(); })))
-                        .child(button("save-host", label(zh, "保存", "Save")).bg(rgb(0x2a476a)).on_click(cx.listener(|app, _, window, cx| { app.save_host_editor(cx); if app.remote.editor.is_none() { app.focus(window, cx); } })))))))
+                    .child(div().flex().gap_2().child(button("cancel-host", tr(&language, "Cancel")).on_click(cx.listener(|app, _, window, cx| { app.remote.editor = None; app.focus(window, cx); cx.notify(); })))
+                        .child(button("save-host", tr(&language, "Save")).bg(rgb(0x2a476a)).on_click(cx.listener(|app, _, window, cx| { app.save_host_editor(cx); if app.remote.editor.is_none() { app.focus(window, cx); } })))))))
     }
 }

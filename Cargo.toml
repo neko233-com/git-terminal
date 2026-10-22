@@ -28,8 +28,12 @@ codegen-units = 1
 strip = "symbols"
 
 [workspace]
-members = [".", "vendor/gpui-terminal"]
+members = [".", "vendor/gpui-terminal", "vendor/gpui-fast-windows"]
 exclude = ["vendor/portable-pty"]
 
 [patch.crates-io]
 portable-pty = { path = "vendor/portable-pty" }
+# gpui-fast 0.1.10 only reports resize hit-test codes for the top border and removes the
+# non-client resize frame on the other three edges, so a borderless window cannot be resized
+# by dragging. See vendor/gpui-fast-windows/MODIFICATIONS.md.
+gpui-fast-windows = { path = "vendor/gpui-fast-windows" }
