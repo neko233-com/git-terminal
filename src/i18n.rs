@@ -136,11 +136,13 @@ impl Language {
 /// English is the source language, so it is always available and is the only
 /// sensible fallback: it is the language the messages are written in.
 pub(crate) fn fallback_language() -> Language {
-    find(SOURCE_LANGUAGE).map(to_language).unwrap_or_else(|| Language {
-        code: SOURCE_LANGUAGE.to_owned(),
-        name: "English".to_owned(),
-        english_name: "English".to_owned(),
-    })
+    find(SOURCE_LANGUAGE)
+        .map(to_language)
+        .unwrap_or_else(|| Language {
+            code: SOURCE_LANGUAGE.to_owned(),
+            name: "English".to_owned(),
+            english_name: "English".to_owned(),
+        })
 }
 
 /// Build the runtime language value of a locale document.

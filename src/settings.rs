@@ -90,7 +90,6 @@ impl Settings {
     /// The stored value is the language selection: `auto` follows the device
     /// language, any other value names a locale document.
     pub fn active_language(&self) -> crate::i18n::Language {
-        crate::i18n::resolve(&self.language)
-            .unwrap_or_else(crate::i18n::system_language)
+        crate::i18n::resolve(&self.language).unwrap_or_else(crate::i18n::system_language)
     }
 }

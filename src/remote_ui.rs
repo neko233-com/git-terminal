@@ -629,56 +629,57 @@ impl Desktop {
                 .enumerate()
                 .filter(|(_, h)| h.group == group)
             {
-                rows = rows.child(
-                    div()
-                        .id(("host", index))
-                        .flex()
-                        .flex_col()
-                        .gap_1()
-                        .p_2()
-                        .rounded_md()
-                        .cursor_pointer()
-                        .bg(rgb(if self.remote.selected == Some(index) {
-                            0x252e3f
-                        } else {
-                            0x171c26
-                        }))
-                        .on_click(cx.listener(move |app, _, _, cx| app.select_host(index, cx)))
-                        .child(
-                            div()
-                                .overflow_hidden()
-                                .text_ellipsis()
-                                .child(host.name.clone()),
-                        )
-                        .child(
-                            div()
-                                .text_color(rgb(0x8c9ab0))
-                                .text_size(px(11.))
-                                .overflow_hidden()
-                                .text_ellipsis()
-                                .child(host.destination.clone()),
-                        )
-                        .child(
-                            div()
-                                .flex()
-                                .gap_1()
-                                .child(
-                                    button(("connect", index), tr(&language, "Connect"))
-                                        .on_click(cx.listener(move |app, _, window, cx| {
-                                            cx.stop_propagation();
-                                            let host = app.remote.hosts[index].clone();
-                                            app.open_ssh(host, window, cx);
-                                        })),
-                                )
-                                .child(
-                                    button(("edit-host", index), tr(&language, "Edit"))
-                                        .on_click(cx.listener(move |app, _, window, cx| {
-                                            cx.stop_propagation();
-                                            app.edit_host(Some(index), window, cx);
-                                        })),
-                                ),
-                        ),
-                );
+                rows =
+                    rows.child(
+                        div()
+                            .id(("host", index))
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .p_2()
+                            .rounded_md()
+                            .cursor_pointer()
+                            .bg(rgb(if self.remote.selected == Some(index) {
+                                0x252e3f
+                            } else {
+                                0x171c26
+                            }))
+                            .on_click(cx.listener(move |app, _, _, cx| app.select_host(index, cx)))
+                            .child(
+                                div()
+                                    .overflow_hidden()
+                                    .text_ellipsis()
+                                    .child(host.name.clone()),
+                            )
+                            .child(
+                                div()
+                                    .text_color(rgb(0x8c9ab0))
+                                    .text_size(px(11.))
+                                    .overflow_hidden()
+                                    .text_ellipsis()
+                                    .child(host.destination.clone()),
+                            )
+                            .child(
+                                div()
+                                    .flex()
+                                    .gap_1()
+                                    .child(
+                                        button(("connect", index), tr(&language, "Connect"))
+                                            .on_click(cx.listener(move |app, _, window, cx| {
+                                                cx.stop_propagation();
+                                                let host = app.remote.hosts[index].clone();
+                                                app.open_ssh(host, window, cx);
+                                            })),
+                                    )
+                                    .child(
+                                        button(("edit-host", index), tr(&language, "Edit"))
+                                            .on_click(cx.listener(move |app, _, window, cx| {
+                                                cx.stop_propagation();
+                                                app.edit_host(Some(index), window, cx);
+                                            })),
+                                    ),
+                            ),
+                    );
             }
         }
         div().id("ssh-hosts").w(px(216.)).min_w(px(176.)).h_full().flex_shrink_0().flex().flex_col().bg(rgb(0x171c26)).border_r_1().border_color(rgb(0x252e3f))

@@ -169,8 +169,12 @@ pub fn write_hosts(hosts: &[Host]) -> Result<()> {
     Ok(())
 }
 
-pub fn load_hosts() -> Result<Vec<Host>> { crate::host_config::load() }
-pub fn save_hosts(hosts: &[Host]) -> Result<()> { crate::host_config::save(hosts) }
+pub fn load_hosts() -> Result<Vec<Host>> {
+    crate::host_config::load()
+}
+pub fn save_hosts(hosts: &[Host]) -> Result<()> {
+    crate::host_config::save(hosts)
+}
 
 pub fn ssh_executable(git: Option<&Path>) -> Result<PathBuf> {
     #[cfg(windows)]

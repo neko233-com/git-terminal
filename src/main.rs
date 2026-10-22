@@ -456,7 +456,11 @@ impl Render for Desktop {
                         cx.notify();
                     }))
                     .child(div().text_color(rgb(0x7cb7ff)).child(
-                        if tab._session.starting.load(Ordering::Acquire) { "·" } else { "›_" }
+                        if tab._session.starting.load(Ordering::Acquire) {
+                            "·"
+                        } else {
+                            "›_"
+                        },
                     ))
                     .child(
                         div()
@@ -903,12 +907,20 @@ fn run() -> Result<u32> {
             }
             LanguageAction::List => {
                 for entry in crate::i18n::available() {
-                    println!("{}\t{}\t{}", entry.code(), entry.name(), entry.english_name());
+                    println!(
+                        "{}\t{}\t{}",
+                        entry.code(),
+                        entry.name(),
+                        entry.english_name()
+                    );
                 }
-                println!("auto\t{}", crate::i18n::translate(
-                    &settings.active_language(),
-                    "Follow the device language"
-                ));
+                println!(
+                    "auto\t{}",
+                    crate::i18n::translate(
+                        &settings.active_language(),
+                        "Follow the device language"
+                    )
+                );
             }
         }
         return Ok(0);
