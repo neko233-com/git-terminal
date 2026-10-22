@@ -8,12 +8,14 @@
 <pre>git-terminal --cwd D:\Code\project
 git-terminal --shell powershell
 git-terminal --print-setup --json
-git-terminal language set chinese
-git-terminal language set english
+git-terminal language list
+git-terminal language set zh-Hans
+git-terminal language set en
+git-terminal language set auto
 git-terminal language get</pre>
 <p>Ctrl+T opens a tab, Ctrl+W closes it, and Ctrl+Tab / Ctrl+Shift+Tab switches tabs. Ctrl+Shift+T/W remains available. Ctrl+Shift+C/V copies/pastes, Shift+PageUp/PageDown scrolls and Ctrl +/- zooms. Drag, double click or triple click selects. Shift bypasses application mouse reporting.</p>
 <p>The dark native window gives priority to tabs and the command area, with a 16px monospace default and coordinated syntax/ANSI colors. Tabs show directory and branch; new tabs inherit the active directory. The + button opens a tab; its adjacent dropdown selects the default shell or interface language. The footer shows directory and active shell. Many tabs scroll horizontally, and closing another tab preserves the selected session.</p>
-<p>Settings: <code>%APPDATA%\git-terminal\settings.json</code>. Language follows the system until selected. The bundled default is owned Bash. Shell profiles and credential storage retain their normal locations.</p>
+<p>Settings: <code>%APPDATA%\git-terminal\settings.json</code>. The interface language follows the device language until one is selected; every language is a document in <code>locales/</code>, so a new language needs no code change, and the names earlier releases accepted keep working. The bundled default is owned Bash. Shell profiles and credential storage retain their normal locations.</p>
 <h2>Shell highlighting and Git prompt</h2><p>The managed Bash input uses native Rust coloring for commands, options, strings, variables, comments and unfinished quotes. It retains Bash readline editing, history and completion. No third-party line editor is loaded. Coloring changes only displayed input cells; command output and alternate-screen applications retain their own colors. PowerShell loads native PSReadLine; CMD keeps its native editor. The Bash prompt shows directory and branch, including parent repositories, worktree .git files and detached HEAD. Prompt updates read HEAD without scanning all files.</p>
 <p>User profile files are read without modification. The managed Bash rc file reads the normal login profile chain inside an interactive non-login shell. Use <code>--no-shell-integration</code> for original login shell behavior. Disable <code>syntax_highlighting</code> to turn off native coloring; disable <code>git_prompt</code> to use your own prompt. Native Bash coloring follows the managed prompt. <code>--no-profile</code> skips user startup files; explicit commands retain ordinary execution and exit status.</p>
 <p>Sessions preserve the launcher's explicit environment overrides, including HOME and temporary directories. Windows installation initializes the pinned runtime mount configuration; acceptance stages those defaults in a disposable copy without modifying frozen packages.</p>

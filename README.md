@@ -21,15 +21,16 @@ git-terminal --cwd D:\Code\project
 git-terminal --shell powershell
 git-terminal --shell cmd
 git-terminal --print-setup --json
-git-terminal language set chinese
-git-terminal language set english
+git-terminal language list
+git-terminal language set zh-Hans
+git-terminal language set en
 git-terminal language set auto
 git-terminal language get
 ~~~
 
 The explicit --command argument runs a command in the chosen shell. --git selects an absolute git-next executable; its identity is checked. Without a bundled Bash runtime, standalone installation selects the platform's native shell. An explicitly unavailable profile fails clearly.
 
-Settings live in %APPDATA%\git-terminal\settings.json on Windows. Language follows the system locale until manually selected. Open the dropdown beside + to choose a default shell or switch Chinese/English. Font zoom and preferences persist atomically. The application never writes terminal output, commands, credentials or environment contents into application logs. Shells manage their normal history files.
+Settings live in %APPDATA%\git-terminal\settings.json on Windows. The interface language follows the device language until one is selected; the names earlier releases accepted (`chinese`, `english`, `auto`) keep working. Open the dropdown beside + to choose a default shell or switch the interface language. Font zoom and preferences persist atomically. The application never writes terminal output, commands, credentials or environment contents into application logs. Shells manage their normal history files.
 
 | Action | Shortcut |
 | --- | --- |
