@@ -93,6 +93,19 @@ row is `HTTOP`, the last row is `HTBOTTOM`, and all four corners report their co
 `tests/windows_desktop_acceptance.py` covers the same behaviour in the project acceptance
 suite as the case `border-drag-resizes-window-on-all-four-edges`.
 
+## Clipboard access
+
+`src/clipboard.rs` serializes clipboard open/close scopes within the process and retries
+temporary Windows clipboard contention every 5 ms for at most 250 ms. Previously one
+failed `OpenClipboard` silently discarded the complete read or write; clipboard observers
+could therefore leave the preceding text in place during a rapid copy with metadata.
+
+The existing text, metadata and embedded-NUL assertions stay unchanged. Two native
+regressions cover overlapping callers and a separate, bounded test process holding the
+clipboard through a real message window for 50 ms. The holder does not change clipboard
+contents and is reaped by its parent. The Go terminal product gate preserves/restores all
+clipboard formats around the original Rust release tests, including thin LTO.
+
 ## Upstream
 
 `gpui-fast` is published by Longbridge (`https://github.com/longbridge/gpui-fast`) and

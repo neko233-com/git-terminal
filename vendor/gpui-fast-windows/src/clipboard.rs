@@ -1,4 +1,9 @@
-use std::{borrow::Cow, sync::LazyLock};
+use std::{
+    borrow::Cow,
+    sync::LazyLock,
+    thread,
+    time::{Duration, Instant},
+};
 
 use anyhow::Result;
 use collections::FxHashMap;
@@ -340,15 +345,27 @@ fn gpui_to_image_format(value: ImageFormat) -> Option<image::ImageFormat> {
     }
 }
 
-struct ClipboardGuard;
+static CLIPBOARD_ACCESS: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
+struct ClipboardGuard {
+    _access: parking_lot::MutexGuard<'static, ()>,
+}
 
 impl ClipboardGuard {
     fn open() -> Option<Self> {
-        match unsafe { OpenClipboard(None) } {
-            Ok(()) => Some(Self),
-            Err(e) => {
-                log::error!("Failed to open clipboard: {e}");
-                None
+        let access = CLIPBOARD_ACCESS.lock();
+        let deadline = Instant::now() + Duration::from_millis(250);
+        loop {
+            match unsafe { OpenClipboard(None) } {
+                Ok(()) => return Some(Self { _access: access }),
+                Err(e) => {
+                    if Instant::now() >= deadline {
+                        log::error!("Failed to open clipboard: {e}");
+                        return None;
+                    }
+                    // Clipboard observers can briefly own it immediately after a write.
+                    thread::sleep(Duration::from_millis(5));
+                }
             }
         }
     }
@@ -359,6 +376,145 @@ impl Drop for ClipboardGuard {
         if let Err(e) = unsafe { CloseClipboard() } {
             log::error!("Failed to close clipboard: {e}");
         }
+    }
+}
+
+#[cfg(test)]
+mod clipboard_open_tests {
+    use super::ClipboardGuard;
+    use std::{
+        fs,
+        path::PathBuf,
+        process::{Child, Command, Stdio},
+        thread,
+        time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    };
+
+    const HOLDER_DIRECTORY: &str = "GPUI_TEST_CLIPBOARD_HOLDER_DIRECTORY";
+
+    struct Holder {
+        process: Child,
+        directory: PathBuf,
+    }
+    impl Drop for Holder {
+        fn drop(&mut self) {
+            let _ = self.process.kill();
+            let _ = self.process.wait();
+            let _ = fs::remove_dir_all(&self.directory);
+        }
+    }
+
+    #[test]
+    fn external_clipboard_holder() {
+        let Some(directory) = std::env::var_os(HOLDER_DIRECTORY) else {
+            return;
+        };
+        let directory = PathBuf::from(directory);
+        use windows::Win32::{
+            System::DataExchange::{CloseClipboard, OpenClipboard},
+            UI::WindowsAndMessaging::{
+                CreateWindowExW, DestroyWindow, HWND_MESSAGE, WINDOW_EX_STYLE, WINDOW_STYLE,
+            },
+        };
+        let owner = unsafe {
+            CreateWindowExW(
+                WINDOW_EX_STYLE::default(),
+                windows::core::w!("STATIC"),
+                None,
+                WINDOW_STYLE::default(),
+                0,
+                0,
+                0,
+                0,
+                Some(HWND_MESSAGE),
+                None,
+                None,
+                None,
+            )
+        }
+        .expect("fixture must own a message window");
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while unsafe { OpenClipboard(Some(owner)) }.is_err() {
+            assert!(Instant::now() < deadline, "fixture must open the clipboard");
+            thread::sleep(Duration::from_millis(5));
+        }
+        fs::write(directory.join("ready"), []).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !directory.join("attempt").exists() {
+            assert!(Instant::now() < deadline, "fixture owner did not signal");
+            thread::sleep(Duration::from_millis(2));
+        }
+        thread::sleep(Duration::from_millis(50));
+        unsafe { CloseClipboard() }.unwrap();
+        unsafe { DestroyWindow(owner) }.unwrap();
+    }
+
+    #[test]
+    fn transient_clipboard_contention_does_not_drop_access() {
+        let directory = std::env::temp_dir().join(format!(
+            "gpui-clipboard-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&directory).unwrap();
+        let process = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "clipboard::clipboard_open_tests::external_clipboard_holder",
+                "--nocapture",
+            ])
+            .env(HOLDER_DIRECTORY, &directory)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let mut holder = Holder { process, directory };
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !holder.directory.join("ready").exists() {
+            assert!(
+                holder.process.try_wait().unwrap().is_none(),
+                "fixture exited before holding the clipboard"
+            );
+            assert!(Instant::now() < deadline, "clipboard fixture timed out");
+            thread::sleep(Duration::from_millis(2));
+        }
+        fs::write(holder.directory.join("attempt"), []).unwrap();
+        let clipboard = ClipboardGuard::open();
+        assert!(
+            clipboard.is_some(),
+            "transient clipboard contention discarded the operation"
+        );
+    }
+
+    #[test]
+    fn in_process_clipboard_access_is_serialized() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+            mpsc,
+        };
+        let released = Arc::new(AtomicBool::new(false));
+        let worker_released = released.clone();
+        let (ready, held) = mpsc::sync_channel(0);
+        let holder = thread::spawn(move || {
+            let clipboard = ClipboardGuard::open().expect("fixture must open the clipboard");
+            ready.send(()).unwrap();
+            thread::sleep(Duration::from_millis(30));
+            worker_released.store(true, Ordering::Release);
+            drop(clipboard);
+        });
+        held.recv().unwrap();
+        let clipboard = ClipboardGuard::open();
+        let serialized = released.load(Ordering::Acquire);
+        drop(clipboard);
+        holder.join().unwrap();
+        assert!(
+            serialized,
+            "a second caller entered before the first closed the clipboard"
+        );
     }
 }
 
