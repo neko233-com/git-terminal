@@ -1,7 +1,7 @@
 // Copyright 2026 git-next contributors. MIT license.
 //! Application connections and OpenSSH share one deterministic view.
 use crate::remote::{self, Host};
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashSet,
@@ -23,6 +23,7 @@ pub enum ImportMode {
 }
 
 #[derive(Serialize, Deserialize)]
+#[expect(dead_code, reason = "Retain the standalone import/export API")]
 struct Bundle {
     schema_version: u32,
     hosts: Vec<Host>,
@@ -79,6 +80,7 @@ fn tokens(line: &str) -> Vec<String> {
     let mut words = Vec::new();
     let mut word = String::new();
     let mut quoted = false;
+    let mut keyword_equals = false;
     let mut chars = line.chars().peekable();
     while let Some(c) = chars.next() {
         match c {
@@ -87,7 +89,16 @@ fn tokens(line: &str) -> Vec<String> {
             '\\' if quoted && chars.peek().is_some_and(|c| matches!(c, '"' | '\\')) => {
                 word.push(chars.next().unwrap())
             }
-            c if !quoted && (c.is_whitespace() || (c == '=' && words.is_empty())) => {
+            '=' if !quoted
+                && !keyword_equals
+                && (words.is_empty() || (words.len() == 1 && word.is_empty())) =>
+            {
+                keyword_equals = true;
+                if !word.is_empty() {
+                    words.push(std::mem::take(&mut word));
+                }
+            }
+            c if !quoted && c.is_whitespace() => {
                 if !word.is_empty() {
                     words.push(std::mem::take(&mut word));
                 }
@@ -423,6 +434,7 @@ pub fn save(hosts: &[Host]) -> Result<()> {
     }
     Ok(())
 }
+#[expect(dead_code, reason = "Retain the standalone import/export API")]
 pub fn import(path: &Path, mode: ImportMode) -> Result<usize> {
     let bytes = read(path)?;
     let incoming = if bytes
@@ -467,6 +479,7 @@ pub fn import(path: &Path, mode: ImportMode) -> Result<usize> {
     save(&hosts)?;
     Ok(added)
 }
+#[expect(dead_code, reason = "Retain the standalone import/export API")]
 pub fn export(path: &Path) -> Result<()> {
     ensure!(
         path != remote::config_path()
@@ -496,6 +509,12 @@ mod tests {
     use super::*;
     #[test]
     fn config_tokens_and_managed_boundaries() {
+        assert_eq!(tokens("Host=work"), ["Host", "work"]);
+        assert_eq!(
+            tokens("HostName = example=invalid"),
+            ["HostName", "example=invalid"]
+        );
+        assert_eq!(tokens("HostName ==value"), ["HostName", "=value"]);
         assert_eq!(
             tokens("Host = \"my server\" work # comment"),
             ["Host", "my server", "work"]

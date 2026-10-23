@@ -1,4 +1,8 @@
-use std::{env, fs, path::PathBuf, process::Command};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 /// Write the module that embeds the locale documents.
 ///
@@ -6,7 +10,7 @@ use std::{env, fs, path::PathBuf, process::Command};
 /// language, and the build discovers them on its own, so adding a language means
 /// dropping in a locale file and rebuilding - no Rust change, no registry edit,
 /// and no list of supported languages that can drift out of date.
-fn generate_locales(root: &PathBuf) {
+fn generate_locales(root: &Path) {
     let locales = root.join("locales");
     println!("cargo:rerun-if-changed=locales");
     let out_dir = PathBuf::from(env::var_os("OUT_DIR").unwrap());

@@ -19,8 +19,10 @@ pub struct SessionTask {
     owned: Arc<parking_lot::Mutex<Option<Session>>>,
 }
 
+type ReaderReady = (Box<dyn Read + Send>, Arc<parking_lot::Mutex<Option<u32>>>);
+
 struct PendingReader {
-    ready: mpsc::Receiver<(Box<dyn Read + Send>, Arc<parking_lot::Mutex<Option<u32>>>)>,
+    ready: mpsc::Receiver<ReaderReady>,
     inner: Option<Box<dyn Read + Send>>,
     status: Option<Arc<parking_lot::Mutex<Option<u32>>>>,
     exit: Arc<parking_lot::Mutex<Option<u32>>>,

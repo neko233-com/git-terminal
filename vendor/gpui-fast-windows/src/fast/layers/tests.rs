@@ -51,7 +51,7 @@ use crate::fast::layers::tile_cache::create_globals;
 const TILE: u32 = 512;
 
 #[cfg(feature = "test-support")]
-#[path = "../../../../gpui/src/fast/rounded_clip_fixtures.rs"]
+#[path = "../rounded_clip_fixtures.rs"]
 mod rounded_clip_tests;
 
 #[cfg(feature = "test-support")]

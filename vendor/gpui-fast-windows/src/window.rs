@@ -1090,7 +1090,7 @@ impl PlatformWindow for WindowsWindow {
         crate::fast::composition::set_composition_order(self, surfaces)
     }
 
-    #[cfg(any(test, feature = "test-support"))]
+    #[cfg(feature = "test-support")]
     fn render_to_image(&self, scene: &Scene) -> anyhow::Result<image::RgbaImage> {
         self.state
             .renderer
