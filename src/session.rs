@@ -225,18 +225,26 @@ impl Setup {
                 } else {
                     "mingw64"
                 };
-                paths.push(root.join("runtime").join(prefix).join("bin"));
-                paths.push(root.join("runtime/usr/bin"));
-                cmd.env(
-                    "MSYSTEM",
-                    if cfg!(target_arch = "aarch64") {
-                        "CLANGARM64"
-                    } else {
-                        "MINGW64"
-                    },
-                );
-                cmd.env("CHERE_INVOKING", "1");
-                cmd.env("MSYS2_PATH_TYPE", "inherit");
+                // A Rust-only install has no owned runtime. Leave those paths and the
+                // MinGW environment unset unless the directories are actually present.
+                let runtime_bin = root.join("runtime").join(prefix).join("bin");
+                let usr_bin = root.join("runtime/usr/bin");
+                if runtime_bin.is_dir() {
+                    paths.push(runtime_bin);
+                }
+                if usr_bin.is_dir() {
+                    paths.push(usr_bin);
+                    cmd.env(
+                        "MSYSTEM",
+                        if cfg!(target_arch = "aarch64") {
+                            "CLANGARM64"
+                        } else {
+                            "MINGW64"
+                        },
+                    );
+                    cmd.env("CHERE_INVOKING", "1");
+                    cmd.env("MSYS2_PATH_TYPE", "inherit");
+                }
                 if let Some(home) =
                     std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))
                 {

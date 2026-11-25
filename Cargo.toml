@@ -22,9 +22,19 @@ sys-locale = "0.3"
 windows-sys = { version = "0.61", features = ["Win32_System_Registry", "Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_Security", "Win32_Security_Credentials", "Win32_Security_Authentication_Identity", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_System_LibraryLoader"] }
 [dev-dependencies]
 alacritty_terminal = "=0.25.1"
+[profile.dev]
+opt-level = 0
+debug = "line-tables-only"
+incremental = true
+
+[profile.test]
+inherits = "dev"
+
 [profile.release]
-lto = "thin"
-codegen-units = 1
+opt-level = 3
+lto = false
+codegen-units = 16
+incremental = true
 strip = "symbols"
 
 [workspace]
