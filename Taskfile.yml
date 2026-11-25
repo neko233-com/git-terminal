@@ -1,0 +1,116 @@
+version: '3'
+
+# Go 1.27.3 + MyGo is the only terminal implementation in this repository.
+
+env:
+  GOTOOLCHAIN: go1.27.3
+  CGO_ENABLED: '0'
+
+vars:
+  GO_BIN: '{{if eq OS "windows"}}git-terminal.exe{{else}}git-terminal{{end}}'
+  VT_LIB: '{{if eq OS "windows"}}ghostty-vt.dll{{else if eq ARCH "arm64"}}libghostty-vt.so{{else}}libghostty-vt.so{{end}}'
+
+tasks:
+  default:
+    cmds:
+      - task: verify
+
+  fmt:
+    desc: Format the Go module
+    dir: go
+    cmds:
+      - gofmt -w .
+
+  fmt:check:
+    desc: Fail when any Go file is unformatted
+    dir: go
+    cmds:
+      - test -z "$(gofmt -l .)"
+
+  vet:
+    desc: Vet the Go module
+    dir: go
+    cmds:
+      - go vet ./...
+
+  test:
+    desc: Run all Go tests with shuffled order and no cache
+    dir: go
+    cmds:
+      - go test -shuffle=on -count=1 ./...
+
+  test:race:
+    desc: Run the race detector; requires a C compiler and cgo
+    dir: go
+    preconditions:
+      - sh: command -v gcc || command -v cc || command -v clang
+        msg: "race detector requires gcc, cc or clang on PATH"
+    env:
+      CGO_ENABLED: '1'
+    cmds:
+      - go test -race ./...
+
+  deps:verify:
+    desc: Verify locked module dependencies
+    dir: go
+    cmds:
+      - go mod verify
+
+  test:cover:
+    desc: Produce a coverage profile
+    dir: go
+    cmds:
+      - mkdir -p ../target/coverage
+      - go test -covermode=atomic -coverprofile=../target/coverage/terminal.out ./...
+      - go tool cover -func=../target/coverage/terminal.out | tail -1
+
+  locales:
+    desc: Validate locale documents against Go source messages
+    dir: go
+    cmds:
+      - go run ./cmd/checklocales --coverage
+
+  no-rust:
+    desc: Refuse Rust sources, Cargo files and rust toolchain calls
+    cmds:
+      - 'test -z "$(find . -name "*.rs" | grep -v target)"'
+      - 'test -z "$(find . -name Cargo.toml)"'
+      - 'test -z "$(find . -name Cargo.lock)"'
+      - 'test -z "$(find . -name build.rs)"'
+      - 'test -z "$(find . -name rust-toolchain.toml)"'
+      - 'test -z "$(grep -R -n -E "(^|[^a-zA-Z])(cargo|rustc)([^a-zA-Z]|$)" go tools --include="*.go" --include="*.py" --include="*.ps1" --include="*.sh")"'
+
+  build:
+    desc: Build the Go terminal and place its native VT library beside it
+    dir: go
+    cmds:
+      - go build -trimpath -ldflags "-s -w" -o ../target/go/{{.GO_BIN}} ./cmd/git-terminal
+      - cp resources/windows-amd64/ghostty-vt.dll ../target/go/ghostty-vt.dll
+      - cp resources/NOTICE.md ../target/go/NOTICE.ghostty-vt.md
+
+  smoke:
+    desc: Run CLI checks that do not need a desktop session
+    deps: [build]
+    env:
+      MYGO_GHOSTTY_VT: '{{.ROOT_DIR}}/go/resources/windows-amd64/ghostty-vt.dll'
+    cmds:
+      - ./target/go/{{.GO_BIN}} --version
+      - ./target/go/{{.GO_BIN}} language list
+      - ./target/go/{{.GO_BIN}} --print-setup --json --no-profile
+
+  verify:
+    desc: Mandatory local gate for commits
+    cmds:
+      - task: fmt:check
+      - task: vet
+      - task: test
+      - task: deps:verify
+      - task: locales
+      - task: no-rust
+      - task: smoke
+
+  release:check:
+    desc: Release gates; does not publish or create a tag
+    cmds:
+      - task: verify
+      - task: test:race

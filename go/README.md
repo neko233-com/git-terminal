@@ -1,39 +1,43 @@
-# Git-Terminal (Go / mygo)
+# Git-Terminal (Go 1.27.3 + MyGo)
 
-The Go build replaces the Rust + GPUI Fast desktop shell with a native
-[mygo](https://github.com/egoist/mygo) window. It uses mygo's Ghostty VT
-terminal view and its pure-Go PTY (ConPTY on Windows, ptmx on POSIX).
+`go/` is the single source of truth for the terminal client. The application is
+built with Go 1.27.3 and [MyGo](https://github.com/egoist/mygo); there is no
+second implementation or Rust tree in this repository. On Windows MyGo's
+terminal plugin uses ConPTY, on POSIX a real PTY. The plugin owns every shell
+process, stream, resize and exit; `SessionManager` owns the tabs and closes
+each session exactly once.
 
-## Build and test
+`Taskfile.yml` at the repository root is the single local entry point.
+
+## Build and verify
 
 ```sh
 cd go
-GOTOOLCHAIN=go1.27.3 go test ./...
-GOTOOLCHAIN=go1.27.3 go run ./cmd/checklocales [--coverage] [--fix]
+GOTOOLCHAIN=go1.27.3 go test -shuffle=on -count=1 ./...
+GOTOOLCHAIN=go1.27.3 go vet ./...
+GOTOOLCHAIN=go1.27.3 go run ./cmd/checklocales --coverage
 GOTOOLCHAIN=go1.27.3 go build -trimpath -ldflags "-s -w" \
   -o ../target/go/git-terminal.exe ./cmd/git-terminal
 cp resources/windows-amd64/ghostty-vt.dll ../target/go/ghostty-vt.dll
+cp resources/NOTICE.md ../target/go/NOTICE.ghostty-vt.md
 ```
 
-`checklocales` is the Go port of `tools/check_locales.py`: it checks every
-`go/locales/*.json` against the English messages in the Go source (structure,
-stale keys, named placeholders, trailing whitespace, sorted keys) and reports
-per-language coverage. `--fix` sorts keys; `--root PATH` selects another
-module directory.
+From the repository root, `task verify` runs formatting, vet, shuffled uncached
+tests, locale checks, the no-Rust guard, the build and headless CLI smoke in one
+gate. `task test-race` is an explicit separate gate: it needs a C compiler and
+fails clearly when none is available. No GUI, desktop-interaction or MSI result
+is claimed by these gates. No GitHub Actions are used.
 
-The mygo plugin loads `ghostty-vt.dll` from beside the executable. For a
-different copy set `MYGO_GHOSTTY_VT` to the DLL path. The binaries are pure Go
-(no cgo); `go test -race` needs a C compiler, which is not required to build.
+`checklocales` verifies every document in `go/locales` against the English
+messages in the Go source: structure, stale keys, named placeholders, trailing
+whitespace and sorted keys. `--fix` sorts keys and `--coverage` reports what
+each language still leaves to English. Adding a language never touches Go code.
 
-Language documents are embedded from `go/locales`; the managed-prompt scripts
-in `go/shell-integration` are byte-for-byte copies of the repository's
-originals. The locale documents started as copies of `../locales`, then the
-messages the Go UI no longer produces (SSH, SFTP, monitor and other unmigrated
-screens) were removed so the Go checker can verify that every key still has a
-source message. The root `locales/` documents are unchanged. At runtime the
-scripts are materialized into
-`<APPDATA or XDG_CONFIG_HOME>/git-terminal/shell-integration` unless they are
-already beside the executable.
+The MyGo plugin loads `ghostty-vt.dll` from beside the executable. To use a
+different copy, set `MYGO_GHOSTTY_VT` to its path. The binary itself is pure Go
+(no cgo). Shell scripts are embedded from `go/shell-integration` and
+materialized into `<APPDATA or XDG_CONFIG_HOME>/git-terminal/shell-integration`
+unless they already exist beside the executable; writing them again is a no-op.
 
 ## Binary size
 
@@ -41,39 +45,40 @@ Measured on Windows/amd64 with `-trimpath -ldflags "-s -w"`:
 
 | Artifact | Bytes | MiB |
 | --- | ---: | ---: |
-| Go `git-terminal.exe` | 14,676,992 | 14.00 |
-| Go `ghostty-vt.dll` | 2,173,952 | 2.07 |
-| Go executable + DLL | 16,850,944 | 16.07 |
-| Rust baseline `target/release/git-terminal.exe` | 16,777,216 | 16.00 |
+| `git-terminal.exe` | 14,678,016 | 14.00 |
+| `ghostty-vt.dll` | 2,173,952 | 2.07 |
+| executable + DLL | 16,851,968 | 16.07 |
 
-The Go executable by itself is 2,100,224 bytes (2.00 MiB) smaller than the
-Rust executable. The Rust baseline is a single file, while the Go build needs
-the separate Ghostty VT DLL: adding that DLL makes the shipped pair 73,728
-bytes (0.07 MiB) larger than the Rust executable alone. So the honest answer
-depends on what is compared: the executable alone shrank, the complete Go
-artifact set is marginally larger. Build output paths change the Go binary by
-a few kilobytes; the numbers above come from the exact command in this file.
+Build output paths shift the executable by a few kilobytes; the numbers above
+come from the exact command in this file.
 
-## Interface contracts kept
+## Ghostty notice
+
+`windows-amd64/ghostty-vt.dll` is MyGo's Windows x64 build of Ghostty's
+`libghostty-vt`. Its upstream source, checksum and license terms are recorded in
+[`resources/NOTICE.md`](resources/NOTICE.md). Keep that notice with any package
+that ships the DLL; the library is used only by MyGo's terminal plugin and is
+never downloaded at runtime.
+
+## Contracts
 
 - A language is a document; English is the source and each missing message
-  falls back per message. The device's preferred UI language wins over
-  locale environment variables. `language list|get|set` and settings in
-  `git-terminal/settings.json` work as before.
-- `--git` is verified with `version --json`: a candidate that does not
-  identify as `git-next` is rejected. The git-next `bin` directory is placed
-  at the front of the shell's `PATH`, before inherited entries.
+  falls back per message. The device preferred-UI language takes priority over
+  locale environment variables. `language list|get|set` and
+  `git-terminal/settings.json` are the supported interface.
+- `--git` is verified with `version --json`: a candidate that does not identify
+  as `git-next` is refused. The verified git-next `bin` directory is placed at
+  the front of the shell's `PATH`, before inherited entries.
+- `--print-setup --json` reports `renderer: "mygo"`. `--cd-to-home` conflicts
+  with `--no-cd`; unknown options fail.
 - Terminal contents, credentials and environment secrets are never logged.
-- Each tab owns its terminal; `SessionManager` closes every session once on
-  tab close, shell exit, or window close. PTY resize is driven by the mygo
-  terminal view following the window size.
+- Closing a tab, a shell exit and window teardown each close a session once;
+  closing twice is harmless. Explicit `--command` keeps normal exit semantics.
 - No Git GUI, shortcut or context menu is installed.
 
-## Not migrated from Rust v0.2.0
+## Not implemented
 
-SSH/SFTP remote workspace, host editor, monitor, askpass dialogs, themes and
-syntax highlighting in the terminal view, the profile menu and the Git GUI
-acceptance harness. `--ssh` and the `remote` subcommand are intentionally not
-implemented. The `--print-setup` renderer is honestly reported as `mygo`;
-the git-next tooling now accepts `gpui-fast` or `mygo` for the terminal
-renderer; the full desktop/MSI lifecycle still needs a separate pass.
+SSH/SFTP remote workspace, host monitor, askpass dialogs, themes and managed
+prompt syntax coloring are outside this client. `--ssh` and the `remote`
+subcommand are intentionally absent. CLI and locale checks are not desktop
+interaction acceptance; no such result is claimed here.

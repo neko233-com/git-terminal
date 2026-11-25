@@ -151,13 +151,20 @@ func scriptForRegion(region string) string {
 // the user chose. Environment variables are used only where no native API
 // exists.
 func systemLanguage() Language {
-	for _, locale := range preferredLocales() {
+	return systemLanguageWith(preferredLocales(), os.Getenv)
+}
+
+// systemLanguageWith is systemLanguage with its two platform inputs supplied
+// explicitly, so the device-first priority can be verified without a native
+// UI-language API.
+func systemLanguageWith(preferred []string, getenv func(string) string) Language {
+	for _, locale := range preferred {
 		if language, ok := matchLocale(locale); ok {
 			return language
 		}
 	}
 	for _, key := range []string{"LC_ALL", "LC_MESSAGES", "LANGUAGE", "LANG"} {
-		value := os.Getenv(key)
+		value := getenv(key)
 		if value == "" {
 			continue
 		}

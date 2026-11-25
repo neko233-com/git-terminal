@@ -17,15 +17,13 @@ type Session interface {
 // Entry is one tab's session. It owns exactly one Session and guarantees
 // Close and the exit callback each run at most once, from any goroutine.
 type Entry struct {
-	id        uint64
-	mu        sync.Mutex
-	title     string
-	session   Session
-	closed    bool
-	exited    bool
-	onExit    func(uint64, int)
-	closeOnce sync.Once
-	exitOnce  sync.Once
+	id      uint64
+	mu      sync.Mutex
+	title   string
+	session Session
+	closed  bool
+	exited  bool
+	onExit  func(uint64, int)
 }
 
 func (e *Entry) ID() uint64 { return e.id }
@@ -57,33 +55,39 @@ func (e *Entry) Exited() bool {
 // Close is idempotent and safe to call from a UI callback or a terminal
 // goroutine. It owns the session: after Close nobody else may use it.
 func (e *Entry) Close() error {
-	var err error
-	e.closeOnce.Do(func() {
-		e.mu.Lock()
-		session, closed := e.session, e.closed
-		e.closed = true
-		e.session = nil
+	e.mu.Lock()
+	if e.closed {
 		e.mu.Unlock()
-		if closed || session == nil {
-			return
-		}
-		err = session.Close()
-	})
-	return err
+		return nil
+	}
+	e.closed = true
+	session := e.session
+	e.session = nil
+	e.mu.Unlock()
+	if session == nil {
+		return nil
+	}
+	// The session is released outside the lock: closing it may call back into
+	// the manager or this entry, which must see the closed state already set.
+	return session.Close()
 }
 
 // NotifyExit records the shell's exit status and invokes the callback once.
 // The callback runs outside the lock so it may close or remove the entry.
 func (e *Entry) NotifyExit(code int) {
-	e.exitOnce.Do(func() {
-		e.mu.Lock()
-		e.exited = true
-		callback := e.onExit
+	e.mu.Lock()
+	if e.exited {
 		e.mu.Unlock()
-		if callback != nil {
-			callback(e.id, code)
-		}
-	})
+		return
+	}
+	e.exited = true
+	callback := e.onExit
+	e.mu.Unlock()
+	// The callback runs outside the lock so it may close or remove the entry,
+	// or re-enter NotifyExit, without deadlocking.
+	if callback != nil {
+		callback(e.id, code)
+	}
 }
 
 // SessionManager owns the set of live tab sessions. Every session it accepts

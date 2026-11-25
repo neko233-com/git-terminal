@@ -15,7 +15,7 @@ import (
 const productVersion = "0.2.0"
 
 // Setup is the session description printed by --print-setup and used to
-// launch shells. Its fields match the Rust implementation.
+// launch shells. Its fields are the public --print-setup JSON contract.
 type Setup struct {
 	Product            string  `json:"product"`
 	Version            string  `json:"version"`
@@ -91,9 +91,9 @@ func discoverSetup(cwd, profile, explicitGit string) (*Setup, error) {
 	}, nil
 }
 
-// findIntegration first looks beside the executable, as the Rust build does,
-// then materializes the embedded scripts into the user config directory so
-// the standalone Go binary has a managed prompt without an installer.
+// findIntegration first looks beside the executable, then materializes the
+// embedded scripts into the user config directory so the standalone binary
+// has a managed prompt without an installer.
 func findIntegration() string {
 	if executable, err := os.Executable(); err == nil {
 		candidate := filepath.Join(filepath.Dir(executable), "shell-integration")
@@ -128,10 +128,10 @@ func findIntegration() string {
 	return dir
 }
 
-// gitCandidate picks one executable by the same priority as the Rust
-// implementation: explicit --git, GIT_NEXT_EXECUTABLE, a sibling, then the
-// installed locations. One candidate is chosen and then verified; a wrong
-// explicit git must fail rather than silently falling through to another.
+// gitCandidate picks one executable in a fixed priority: explicit --git,
+// GIT_NEXT_EXECUTABLE, a sibling, then the installed locations. One candidate
+// is chosen and then verified; a wrong explicit git must fail rather than
+// silently falling through to another.
 func gitCandidate(explicit string) string {
 	if explicit != "" {
 		return explicit

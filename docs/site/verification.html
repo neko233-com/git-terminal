@@ -1,15 +1,10 @@
 <!doctype html>
-<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Git-Terminal local verification</title>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Git-Terminal local verification</title><style>body{max-width:820px;margin:50px auto;padding:0 24px;background:#12151b;color:#d9e1eb;font:16px/1.6 system-ui}a{color:#91bcff}code{background:#202936;padding:3px 6px;border-radius:5px}</style></head>
 <body><nav><a href="index.html">Git-Terminal</a></nav><main>
 <h1>Local product verification</h1>
-<p>The git-next bundle invokes Rust formatting, clippy, workspace unit tests and
-the real PTY shell gate through its Go terminal-product-acceptance command.
-Profiles are disposable and the owned Git/Bash distribution is explicit.
-Real Windows desktop acceptance is a separate gate.</p>
-<p>The rounded-clip fixture is included inside the vendored Windows renderer,
-copied from locked gpui-fast 0.1.10. Image-render trait methods follow the
-dependency test-support feature. Production rendering is unchanged.</p>
-<p>SSH configuration accepts both <code>Host=alias</code> and
-<code>Host = alias</code>; equals signs in values remain data.</p>
+<p>The Go 1.27.3 + MyGo client is the only terminal implementation here. <code>task verify</code> is the mandatory local gate; <code>task test-race</code> is an explicit separate gate that fails without a C compiler.</p>
+<p>The gate runs <code>gofmt</code>, <code>go vet</code>, shuffled uncached <code>go test ./...</code>, <code>go run ./cmd/checklocales</code>, the no-Rust guard, a trimmed build with the Ghostty VT library, and headless CLI smoke checks. All checks run locally; no GitHub Actions and no desktop-interaction result is claimed.</p>
+<p>The no-Rust guard refuses <code>*.rs</code>, Cargo files and Rust toolchain calls in this repository, and checks that external git-next evidence allowlists no longer name this repository's Rust paths.</p>
+<p>See <a href="../ENGINEERING_VERIFICATION.md">the verification note</a> for the gate order and <a href="../../go/README.md">the Go implementation note</a> for scope, prerequisites and the Ghostty notice.</p>
 </main></body></html>

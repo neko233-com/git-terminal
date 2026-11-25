@@ -9,8 +9,9 @@ import (
 	"strconv"
 )
 
-// Settings mirrors the fields of the Rust implementation so existing
-// configuration files keep working.
+// Settings is the persisted application configuration. Its JSON field names
+// are the stable on-disk contract; missing or invalid values fall back to the
+// documented defaults.
 type Settings struct {
 	Language           string  `json:"language"`
 	FontSize           float64 `json:"font_size"`
@@ -50,6 +51,21 @@ func loadSettings() Settings {
 		var stored Settings
 		if json.Unmarshal(data, &stored) == nil {
 			settings = stored
+			// An older document may omit a boolean entirely. false is a valid
+			// explicit choice, so only absent fields take the default.
+			var present struct {
+				SyntaxHighlighting *bool `json:"syntax_highlighting"`
+				GitPrompt          *bool `json:"git_prompt"`
+			}
+			if json.Unmarshal(data, &present) == nil {
+				defaults := defaultSettings()
+				if present.SyntaxHighlighting == nil {
+					settings.SyntaxHighlighting = defaults.SyntaxHighlighting
+				}
+				if present.GitPrompt == nil {
+					settings.GitPrompt = defaults.GitPrompt
+				}
+			}
 		}
 	}
 	// A file written by an older build may not have every field.

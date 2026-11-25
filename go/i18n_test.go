@@ -117,6 +117,41 @@ func translateSource() Language {
 	return language
 }
 
+func TestDeviceLanguagePrecedesEnvironment(t *testing.T) {
+	env := func(key string) string {
+		if key == "LANG" {
+			return "en_US.UTF-8"
+		}
+		return ""
+	}
+	if got := systemLanguageWith([]string{"zh-TW"}, env); got.Code != "zh-Hant" {
+		t.Errorf("device zh-TW was overridden by LANG: %q", got.Code)
+	}
+	if got := systemLanguageWith([]string{"de-DE"}, env); got.Code != "de" {
+		t.Errorf("device de-DE was overridden by LANG: %q", got.Code)
+	}
+	// An unusable device preference, or none at all, falls through to LANG.
+	if got := systemLanguageWith([]string{"xx-YY"}, env); got.Code != "en" {
+		t.Errorf("LANG fallback = %q, want en", got.Code)
+	}
+	if got := systemLanguageWith(nil, env); got.Code != "en" {
+		t.Errorf("LANG fallback without device preference = %q, want en", got.Code)
+	}
+	// LC_ALL wins over LANG when no device language applies.
+	got := systemLanguageWith(nil, func(key string) string {
+		if key == "LC_ALL" {
+			return "ja_JP"
+		}
+		return "en_US"
+	})
+	if got.Code != "ja" {
+		t.Errorf("LC_ALL = %q, want ja", got.Code)
+	}
+	if got := systemLanguageWith(nil, func(string) string { return "" }); got.Code != "en" {
+		t.Errorf("no preference = %q, want source language en", got.Code)
+	}
+}
+
 func TestResolveAndCanonical(t *testing.T) {
 	cases := []struct{ input, want string }{
 		{"zh-CN", "zh-Hans"}, {"zh-TW", "zh-Hant"}, {"zh_Hans", "zh-Hans"},

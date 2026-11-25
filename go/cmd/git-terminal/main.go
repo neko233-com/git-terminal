@@ -211,7 +211,10 @@ func run(args []string) (int, error) {
 	}
 	settings := gt.LoadSettings()
 	if opts.languageAction != "" {
-		return 0, runLanguage(opts, &settings)
+		if err := runLanguage(opts, &settings); err != nil {
+			return 1, err
+		}
+		return 0, nil
 	}
 	cwd := ""
 	if opts.cdToHome {
