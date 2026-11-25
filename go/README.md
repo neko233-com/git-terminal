@@ -23,10 +23,11 @@ cp resources/NOTICE.md ../target/go/NOTICE.ghostty-vt.md
 ```
 
 From the repository root, `task verify` runs formatting, vet, shuffled uncached
-tests, locale checks, the no-Rust guard, the build and headless CLI smoke in one
-gate. `task test-race` is an explicit separate gate: it needs a C compiler and
-fails clearly when none is available. No GUI, desktop-interaction or MSI result
-is claimed by these gates. No GitHub Actions are used.
+tests with `CGO_ENABLED=0`, locale checks, the no-Rust and no-cgo guards, the
+build and headless CLI smoke in one gate. The race detector is not a gate
+because it requires cgo, which this product does not use. No GUI,
+desktop-interaction or MSI result is claimed by these gates. No GitHub Actions
+are used.
 
 `checklocales` verifies every document in `go/locales` against the English
 messages in the Go source: structure, stale keys, named placeholders, trailing

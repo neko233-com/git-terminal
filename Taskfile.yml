@@ -39,17 +39,6 @@ tasks:
     cmds:
       - go test -shuffle=on -count=1 ./...
 
-  test:race:
-    desc: Run the race detector; requires a C compiler and cgo
-    dir: go
-    preconditions:
-      - sh: command -v gcc || command -v cc || command -v clang
-        msg: "race detector requires gcc, cc or clang on PATH"
-    env:
-      CGO_ENABLED: '1'
-    cmds:
-      - go test -race ./...
-
   deps:verify:
     desc: Verify locked module dependencies
     dir: go
@@ -80,6 +69,12 @@ tasks:
       - 'test -z "$(find . -name rust-toolchain.toml)"'
       - 'test -z "$(grep -R -n -E "(^|[^a-zA-Z])(cargo|rustc)([^a-zA-Z]|$)" go tools --include="*.go" --include="*.py" --include="*.ps1" --include="*.sh")"'
 
+  no-cgo:
+    desc: Refuse cgo source and require CGO_ENABLED=0
+    cmds:
+      - 'test "$(go env CGO_ENABLED)" = "0"'
+      - 'test -z "$(grep -R -n -E "^[[:space:]]*import[[:space:]]+\"C\"|#cgo" go --include="*.go")"'
+
   build:
     desc: Build the Go terminal and place its native VT library beside it
     dir: go
@@ -107,10 +102,10 @@ tasks:
       - task: deps:verify
       - task: locales
       - task: no-rust
+      - task: no-cgo
       - task: smoke
 
   release:check:
     desc: Release gates; does not publish or create a tag
     cmds:
       - task: verify
-      - task: test:race

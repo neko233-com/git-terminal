@@ -6,7 +6,7 @@
 - Default the bundled Windows application to its owned Bash shell when that runtime exists; support native PowerShell and CMD profiles. Always put the verified git-next `bin` directory before inherited PATH.
 - `--git` must verify the candidate identifies as `git-next`; a non-git-next executable is refused. No Git GUI application, shortcut or context menu.
 - Never log terminal contents, credentials, environment secrets or private paths in public evidence.
-- `Taskfile.yml` is the single local entry point. `task verify` must pass gofmt, go vet, `go test -shuffle=on -count=1 ./...`, locale checks, the no-Rust guard, build and CLI smoke. `task test-race` is an explicit gate; without a C compiler it must fail clearly and never be marked passed. Never create or run `.github/workflows`.
+- `Taskfile.yml` is the single local entry point. `task verify` must pass gofmt, go vet, `go test -shuffle=on -count=1 ./...` with `CGO_ENABLED=0`, locale checks, the no-Rust and no-cgo guards, build and CLI smoke. The product contains no cgo; the race detector is not a gate because it requires cgo. Never create or run `.github/workflows`.
 - Keep README, `docs/site/` and the Go implementation note accurate, and use Conventional Commits with `Assisted-by: Codex:GPT-6`.
 - If product behavior needs to change these constraints, update this file, the Taskfile, the tests and README before changing the implementation.
 

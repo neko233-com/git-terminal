@@ -7,8 +7,7 @@ The current implementation is Go 1.27.3 with [MyGo](https://github.com/egoist/my
 `Taskfile.yml` is the single local entry point. It pins Go 1.27.3 and keeps the client CGO-free.
 
 ```sh
-task verify        # gofmt, vet, shuffled tests, locales, no-Rust guard, build, CLI smoke
-task test:race     # explicit gate; fails clearly without a C compiler
+task verify        # gofmt, vet, CGO=0/no-cgo, shuffled tests, locales, no-Rust guard, build, CLI smoke
 task build         # target/go/git-terminal(.exe) plus ghostty-vt.dll and NOTICE
 ```
 

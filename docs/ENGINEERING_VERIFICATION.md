@@ -2,8 +2,8 @@
 
 The Go 1.27.3 + MyGo client is the only terminal implementation in this
 repository. `Taskfile.yml` is the single entry point; `task verify` is the
-mandatory local gate and `task test-race` is an explicit, separate gate that
-fails clearly when no C compiler is available.
+mandatory local gate with `CGO_ENABLED=0`. The product contains no cgo, so the
+race detector is not a gate because it requires cgo.
 
 `task verify` runs, in order:
 
@@ -22,9 +22,10 @@ fails clearly when no C compiler is available.
 7. CLI smoke: `--version`, `language list` and `--print-setup --json`, none of
    which needs a desktop session.
 
-The Go module has no cgo dependency; `-race` is not part of `task verify`
-because it needs a C compiler. All checks run locally. No GitHub Actions are
-used and no GUI, MSI or desktop-interaction result is claimed by this gate.
+The Go module has no cgo dependency; `no-cgo` rejects `import "C"` and `#cgo`,
+and the race detector is intentionally outside the gate because it needs cgo.
+All checks run locally. No GitHub Actions are used and no GUI, MSI or
+desktop-interaction result is claimed by this gate.
 
 The native library shipped beside the executable is MyGo's Windows x64 build
 of Ghostty's `libghostty-vt`; its upstream source, checksum and license note are
