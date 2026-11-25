@@ -1,0 +1,12 @@
+{
+  "code": "de",
+  "name": "Deutsch",
+  "english_name": "German",
+  "messages": {
+    "Done": "Fertig",
+    "Files": "Dateien",
+    "Follow the device language": "Der Gerätesprache folgen",
+    "Language": "Sprache",
+    "Save": "Speichern"
+  }
+}

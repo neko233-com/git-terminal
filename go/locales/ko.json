@@ -1,0 +1,12 @@
+{
+  "code": "ko",
+  "name": "한국어",
+  "english_name": "Korean",
+  "messages": {
+    "Done": "완료",
+    "Files": "파일",
+    "Follow the device language": "기기 언어 따르기",
+    "Language": "인터페이스 언어",
+    "Save": "저장"
+  }
+}

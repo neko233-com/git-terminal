@@ -1,0 +1,12 @@
+{
+  "code": "zh-Hant",
+  "name": "繁體中文",
+  "english_name": "Traditional Chinese",
+  "messages": {
+    "Done": "完成",
+    "Files": "檔案",
+    "Follow the device language": "跟隨裝置語言",
+    "Language": "介面語言",
+    "Save": "儲存"
+  }
+}

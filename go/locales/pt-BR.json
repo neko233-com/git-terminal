@@ -1,0 +1,12 @@
+{
+  "code": "pt-BR",
+  "name": "Português do Brasil",
+  "english_name": "Brazilian Portuguese",
+  "messages": {
+    "Done": "Concluído",
+    "Files": "Arquivos",
+    "Follow the device language": "Seguir o idioma do dispositivo",
+    "Language": "Idioma",
+    "Save": "Salvar"
+  }
+}

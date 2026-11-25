@@ -1,0 +1,12 @@
+{
+  "code": "zh-Hans",
+  "name": "简体中文",
+  "english_name": "Simplified Chinese",
+  "messages": {
+    "Done": "完成",
+    "Files": "文件",
+    "Follow the device language": "跟随设备语言",
+    "Language": "界面语言",
+    "Save": "保存"
+  }
+}

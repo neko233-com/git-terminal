@@ -1,0 +1,12 @@
+{
+  "code": "ja",
+  "name": "日本語",
+  "english_name": "Japanese",
+  "messages": {
+    "Done": "完了",
+    "Files": "ファイル",
+    "Follow the device language": "デバイスの言語に従う",
+    "Language": "表示言語",
+    "Save": "保存"
+  }
+}

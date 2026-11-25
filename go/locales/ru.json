@@ -1,0 +1,12 @@
+{
+  "code": "ru",
+  "name": "Русский",
+  "english_name": "Russian",
+  "messages": {
+    "Done": "Готово",
+    "Files": "Файлы",
+    "Follow the device language": "Следовать языку устройства",
+    "Language": "Язык",
+    "Save": "Сохранить"
+  }
+}

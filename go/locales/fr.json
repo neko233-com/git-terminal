@@ -1,0 +1,12 @@
+{
+  "code": "fr",
+  "name": "Français",
+  "english_name": "French",
+  "messages": {
+    "Done": "Terminé",
+    "Files": "Fichiers",
+    "Follow the device language": "Suivre la langue de l'appareil",
+    "Language": "Langue",
+    "Save": "Enregistrer"
+  }
+}

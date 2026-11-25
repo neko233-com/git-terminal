@@ -6,6 +6,8 @@ For an existing installation, close Git-Terminal and run the matching architectu
 
 The existing Git product update task remains responsible for Git releases. Install this separate terminal component update explicitly; it does not change the Git engine version or updater comparison. No standalone terminal automatic update is claimed. Linux/macOS Git packages are unchanged.
 
+**Migration in progress:** the independent client is being rewritten in Go 1.27 with MyGo's GPUI-style native UI and terminal plugin (`go/`). The Go build is compiled locally and must pass the same shell/session/i18n checks before replacing the published Rust + GPUI Fast binary; the existing Rust tree is the rollback path. See [the Go implementation note](go/README.md) for current scope and prerequisites.
+
 A native Rust + GPUI Fast terminal and SSH workspace for Windows. This independent Git submodule sits beside git-next. The Windows git-next MSI installs both products and a Git-Terminal Start menu shortcut.
 
 The application renders real ConPTY sessions through GPUI Fast, without opening an external terminal. It provides tabs, ANSI/true color, alternate screens, Unicode/Chinese input, selection, scrollback, bracketed paste, copy/paste, font zoom, resize, exit handling and owned process cleanup. There is no Git GUI interface.
@@ -14,7 +16,7 @@ Windows uses one integrated native title/tab bar with an embedded application ic
 
 Desktop acceptance copies clipboard formats eagerly into memory and restores them without retaining a cross-process OLE object. Clipboard contents are never logged or written to fixture files. Unsupported formats fail before mutation.
 
-The bundled default is its owned Bash shell, retaining familiar Git Bash commands and existing HOME configuration. PowerShell and CMD profiles are available. Every session prepends the installed git-next runtime to PATH. git-next owns installation and the protected old-Git handoff; this application leaves repositories and credential storage in place.
+The bundled default is its owned Bash shell when that runtime is installed, retaining familiar Git Bash commands and existing HOME configuration. PowerShell and CMD profiles are available. A session prepends `runtime/<prefix>/bin` and `runtime/usr/bin` only when those directories exist, and only then sets `MSYSTEM`. A Rust-only layout selects PowerShell or CMD and does not advertise MinGW. git-next owns installation and the protected old-Git handoff; this application leaves repositories and credential storage in place.
 
 ~~~powershell
 git-terminal --cwd D:\Code\project
@@ -54,6 +56,8 @@ cargo fmt --all --check
 cargo clippy --locked --all-targets --target x86_64-pc-windows-msvc -- -D warnings
 cargo test --locked --target x86_64-pc-windows-msvc
 ~~~
+
+Release uses opt-level 3, 16 codegen units, and no LTO. Tests and `cargo check` stay on the incremental dev profile.
 
 Build with Rust 1.96+, the Windows SDK and Visual Studio C++ tools. Complete implementation before consolidated terminal, desktop and MSI acceptance. Compilation alone is not desktop interaction acceptance. Results are recorded in docs/acceptance.json when available. No GitHub Actions are used. [HTML manual](docs/site/index.html).
 

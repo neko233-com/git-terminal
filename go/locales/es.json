@@ -1,0 +1,12 @@
+{
+  "code": "es",
+  "name": "Español",
+  "english_name": "Spanish",
+  "messages": {
+    "Done": "Hecho",
+    "Files": "Archivos",
+    "Follow the device language": "Seguir el idioma del dispositivo",
+    "Language": "Idioma",
+    "Save": "Guardar"
+  }
+}
